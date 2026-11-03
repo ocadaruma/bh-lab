@@ -47,16 +47,14 @@ row = control octave; see `tools/dev_host.mm`):
 ```
 
 For host-facing behaviour there is `au-midi-probe`, which drives the installed
-`.component` the way a host does (state restore, enable-time renders, velocity
-round-trips). Logic is only needed for final integration checks:
+`.component` the way a host does (state restore, enable-time renders). Logic is only
+needed for final integration checks:
 
 ```sh
 ./build/au-midi-probe
 ```
 
-The `deps/clap-wrapper` submodule is pinned to a local commit on top of v0.17.0 that
-carries one fix this project needs (AUv2 velocity rounding, see the submodule's
-clog); a future bump to a newer upstream tag must re-apply it.
+Logic is only needed for final integration checks.
 
 ## Layout
 
