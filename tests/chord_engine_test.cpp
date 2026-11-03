@@ -1,6 +1,6 @@
 // Unit tests for the chord engine. No framework -- plain asserts keep the build tiny.
 #include <cstdio>
-#include <vector>
+#include <initializer_list>
 
 #include "chord_engine.h"
 
@@ -11,9 +11,17 @@ namespace
 
 int failures = 0;
 
-void expectChord(const char *what, const Chord &got, const std::vector<int> &want)
+// A 12-bit pitch class mask from semitone offsets.
+uint16_t mask(std::initializer_list<int> offsets)
 {
-  bool ok = got.count == static_cast<int>(want.size());
+  uint16_t m = 0;
+  for (int o : offsets) m |= 1u << (o % 12);
+  return m;
+}
+
+void expectChord(const char *what, const Chord &got, const int want[], int wantCount)
+{
+  bool ok = got.count == wantCount;
   for (int i = 0; ok && i < got.count; ++i) ok = got.notes[i] == want[i];
 
   if (ok) return;
@@ -22,7 +30,7 @@ void expectChord(const char *what, const Chord &got, const std::vector<int> &wan
   printf("FAIL %s\n  got: ", what);
   for (int i = 0; i < got.count; ++i) printf("%d ", got.notes[i]);
   printf("\n  want: ");
-  for (int n : want) printf("%d ", n);
+  for (int i = 0; i < wantCount; ++i) printf("%d ", want[i]);
   printf("\n");
 }
 
@@ -33,67 +41,121 @@ void expectTrue(const char *what, bool cond)
   printf("FAIL %s\n", what);
 }
 
-constexpr int kC2 = 48;
+void expectSelection(const char *what, const ScaleSelection &got, ScaleFamily family, int keyPc)
+{
+  if (got.family == family && got.keyPc == keyPc) return;
+  ++failures;
+  printf("FAIL %s\n  got: family %d key %d, want family %d key %d\n", what,
+         static_cast<int>(got.family), got.keyPc, static_cast<int>(family), keyPc);
+}
 
 }  // namespace
 
 int main()
 {
-  // Qualities, root position.
-  expectChord("C major", buildChord(kC2, Quality::Major, Inversion::Root), {48, 52, 55});
-  expectChord("C minor", buildChord(kC2, Quality::Minor, Inversion::Root), {48, 51, 55});
-  expectChord("C maj7", buildChord(kC2, Quality::Maj7, Inversion::Root), {48, 52, 55, 59});
-  expectChord("C min7", buildChord(kC2, Quality::Min7, Inversion::Root), {48, 51, 55, 58});
-  expectChord("C 6", buildChord(kC2, Quality::Six, Inversion::Root), {48, 52, 55, 57});
-  expectChord("C dom7", buildChord(kC2, Quality::Dom7, Inversion::Root), {48, 52, 55, 58});
-  expectChord("C sus4", buildChord(kC2, Quality::Sus4, Inversion::Root), {48, 53, 55});
+  // --- the tables -------------------------------------------------------------
+  expectTrue("major 6th scale",
+             scalePitchClasses(ScaleFamily::Major6) == mask({0, 2, 4, 5, 7, 8, 9, 11}));
+  expectTrue("minor 6th scale",
+             scalePitchClasses(ScaleFamily::Minor6) == mask({0, 2, 3, 5, 7, 8, 9, 11}));
+  expectTrue("7th scale", scalePitchClasses(ScaleFamily::Seven) == mask({0, 2, 4, 5, 7, 8, 10, 11}));
+  expectTrue("7b5 scale", scalePitchClasses(ScaleFamily::SevenB5) == mask({0, 2, 4, 5, 6, 8, 10, 11}));
+  expectTrue("major 6th named chord", namedChordPitchClasses(ScaleFamily::Major6) == mask({0, 4, 7, 9}));
+  expectTrue("minor 6th named chord", namedChordPitchClasses(ScaleFamily::Minor6) == mask({0, 3, 7, 9}));
+  expectTrue("7th named chord", namedChordPitchClasses(ScaleFamily::Seven) == mask({0, 4, 7, 10}));
+  expectTrue("7b5 named chord", namedChordPitchClasses(ScaleFamily::SevenB5) == mask({0, 4, 6, 10}));
+  expectTrue("dim chord", dimChordPitchClasses(2) == mask({2, 5, 8, 11}));
+  expectTrue("dim chord wraps", dimChordPitchClasses(11) == mask({11, 2, 5, 8}));
 
-  // Inversions lift the lowest voices by an octave and stay sorted.
-  expectChord("C major 1st", buildChord(kC2, Quality::Major, Inversion::First), {52, 55, 60});
-  expectChord("C major 2nd", buildChord(kC2, Quality::Major, Inversion::Second), {55, 60, 64});
-  expectChord("C maj7 3rd", buildChord(kC2, Quality::Maj7, Inversion::Third), {59, 60, 64, 67});
-
-  // A triad has no 3rd inversion; it falls back to the 2nd rather than dropping a voice.
-  expectChord("C major 3rd falls back", buildChord(kC2, Quality::Major, Inversion::Third),
-              {55, 60, 64});
-
-  // Octave doubling keeps root position and adds the octave on top.
-  expectChord("C major octave", buildChord(kC2, Quality::Major, Inversion::OctaveDouble),
-              {48, 52, 55, 60});
-
-  // Voices above 127 are dropped, not wrapped.
+  // --- scale selection ---------------------------------------------------------
+  // A full named chord identifies its scale unambiguously (see chord-to-scale-uniqueness.md).
   {
-    const Chord high = buildChord(126, Quality::Maj7, Inversion::Root);
-    expectTrue("high root drops out-of-range voices", high.count == 1 && high.notes[0] == 126);
+    ScaleSelection sel;
+    expectTrue("CEGA -> C major 6th", selectScale(mask({0, 4, 7, 9}), &sel));
+    expectSelection("CEGA selection", sel, ScaleFamily::Major6, 0);
+  }
+  {
+    ScaleSelection sel;
+    expectTrue("EGAC is the same set", selectScale(mask({4, 7, 9, 0}), &sel));
+    expectSelection("EGAC selection", sel, ScaleFamily::Major6, 0);
+  }
+  {
+    ScaleSelection sel;
+    expectTrue("CEbGA -> C minor 6th", selectScale(mask({0, 3, 7, 9}), &sel));
+    expectSelection("CEbGA selection", sel, ScaleFamily::Minor6, 0);
+  }
+  {
+    ScaleSelection sel;
+    expectTrue("CEF#A -> A minor 6th", selectScale(mask({0, 4, 6, 9}), &sel));
+    expectSelection("CEF#A selection", sel, ScaleFamily::Minor6, 9);
+  }
+  {
+    ScaleSelection sel;
+    expectTrue("CEGBb -> C 7th", selectScale(mask({0, 4, 7, 10}), &sel));
+    expectSelection("CEGBb selection", sel, ScaleFamily::Seven, 0);
+  }
+  {
+    ScaleSelection sel;
+    expectTrue("CEGbBb -> C 7b5", selectScale(mask({0, 4, 6, 10}), &sel));
+    expectSelection("CEGbBb selection", sel, ScaleFamily::SevenB5, 0);
   }
 
-  // Inversions are only offered when the chord has a voice to put in the bass.
-  expectTrue("triads have no 3rd inversion",
-             !inversionAvailable(Quality::Major, Inversion::Third) &&
-                 inversionAvailable(Quality::Maj7, Inversion::Third));
-  expectTrue("octave double applies to any chord",
-             inversionAvailable(Quality::Major, Inversion::OctaveDouble) &&
-                 inversionAvailable(Quality::Maj7, Inversion::OctaveDouble));
+  // The dim chord belongs to all four families; the preference order picks the first.
+  {
+    ScaleSelection sel;
+    expectTrue("DFAbB -> major 6th", selectScale(mask({2, 5, 8, 11}), &sel));
+    expectSelection("DFAbB selection", sel, ScaleFamily::Major6, 0);
+  }
 
-  // Control zone mapping: white keys are qualities, black keys are inversions.
-  expectTrue("C sets major", mapControlKey(0).action == ControlAction::SetQuality &&
-                                 mapControlKey(0).value == static_cast<int>(Quality::Major));
-  expectTrue("D sets minor", mapControlKey(2).action == ControlAction::SetQuality &&
-                                 mapControlKey(2).value == static_cast<int>(Quality::Minor));
-  expectTrue("B sets sus4", mapControlKey(11).action == ControlAction::SetQuality &&
-                                mapControlKey(11).value == static_cast<int>(Quality::Sus4));
-  expectTrue("C# sets root position",
-             mapControlKey(1).action == ControlAction::SetInversion &&
-                 mapControlKey(1).value == static_cast<int>(Inversion::Root));
-  expectTrue("G# sets 3rd inversion",
-             mapControlKey(8).action == ControlAction::SetInversion &&
-                 mapControlKey(8).value == static_cast<int>(Inversion::Third));
-  expectTrue("A# sets octave double",
-             mapControlKey(10).action == ControlAction::SetInversion &&
-                 mapControlKey(10).value == static_cast<int>(Inversion::OctaveDouble));
-  expectTrue("out of range offset does nothing",
-             mapControlKey(12).action == ControlAction::None &&
-                 mapControlKey(-1).action == ControlAction::None);
+  // Partial presses.
+  {
+    ScaleSelection sel;
+    expectTrue("C alone -> major 6th", selectScale(mask({0}), &sel));
+    expectSelection("C selection", sel, ScaleFamily::Major6, 0);
+  }
+  {
+    ScaleSelection sel;
+    expectTrue("C+Eb -> minor 6th", selectScale(mask({0, 3}), &sel));
+    expectSelection("C+Eb selection", sel, ScaleFamily::Minor6, 0);
+  }
+  {
+    // E and G: the root-named E minor 6th chord {E G B C} covers them.
+    ScaleSelection sel;
+    expectTrue("E+G -> E minor 6th", selectScale(mask({4, 7}), &sel));
+    expectSelection("E+G selection", sel, ScaleFamily::Minor6, 4);
+  }
+  {
+    // C and B match no stacked chord: the previous selection is kept.
+    ScaleSelection sel = {ScaleFamily::Seven, 4};
+    expectTrue("C+B matches nothing", !selectScale(mask({0, 11}), &sel));
+    expectSelection("kept selection", sel, ScaleFamily::Seven, 4);
+  }
+  {
+    ScaleSelection sel;
+    expectTrue("empty mask matches nothing", !selectScale(0, &sel));
+  }
+
+  // --- stacked chords ------------------------------------------------------------
+  const ScaleSelection c6 = {ScaleFamily::Major6, 0};
+  const ScaleSelection am6 = {ScaleFamily::Minor6, 9};
+
+  // design.md's example: C major 6th, E4 on top -> G3 A3 C4 E4.
+  expectChord("E4 on top of C6", buildStackedChord(c6, 64, VoicingType::Close),
+              (const int[]){55, 57, 60, 64}, 4);
+  // D3 on top: the dim chord, F2 Ab2 B2 D3.
+  expectChord("D3 on top of C6", buildStackedChord(c6, 50, VoicingType::Close),
+              (const int[]){41, 44, 47, 50}, 4);
+  // C3 on top: the named chord root position, E3 G3 A3 C3.
+  expectChord("C3 on top of C6", buildStackedChord(c6, 60, VoicingType::Close),
+              (const int[]){52, 55, 57, 60}, 4);
+  // Am6 with C4 on top: E3 F#3 A3 C4.
+  expectChord("C4 on top of Am6", buildStackedChord(am6, 60, VoicingType::Close),
+              (const int[]){52, 54, 57, 60}, 4);
+
+  // A note outside the scale produces nothing.
+  expectTrue("Bb is not in C6", buildStackedChord(c6, 70, VoicingType::Close).count == 0);
+  expectTrue("root out of range", buildStackedChord(c6, -1, VoicingType::Close).count == 0);
+  expectTrue("root past range", buildStackedChord(c6, 128, VoicingType::Close).count == 0);
 
   if (failures)
   {

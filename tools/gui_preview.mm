@@ -5,6 +5,8 @@
 
 #import <Cocoa/Cocoa.h>
 
+#include <initializer_list>
+
 #include "bhl_gui.h"
 #include "chord_engine.h"
 
@@ -21,33 +23,27 @@ int main(int argc, const char **argv)
 
     bhl::GuiState state;
     // The plugin publishes these from its parameters; the preview seeds them by hand.
-    state.controlRoot.store(48);
+    state.controlRoot.store(57);  // A2, matching the held notes below
     state.triggerStart.store(60);
-    state.quality.store(static_cast<int>(bhl::Quality::Min7));
-    state.inversion.store(static_cast<int>(bhl::Inversion::First));
+    state.voicing.store(0);
+    state.selection.store(static_cast<int>(bhl::ScaleFamily::Minor6) * 12 + 9);  // A minor 6th
 
     const char *mode = argc < 3 ? "playing" : argv[2];
 
-    bhl::Quality quality = bhl::Quality::Min7;
-    int root = 62;
-    if (strcmp(mode, "idle") == 0)
-    {
-      // A triad, so the unavailable third inversion can be seen greyed out.
-      quality = bhl::Quality::Major;
-      root = 60;
-      state.quality.store(static_cast<int>(quality));
-    }
-
+    // A m6 with C4 on top: E3 F#3 A3 C4, and the control notes that identified the
+    // scale held down.
     if (strcmp(mode, "idle") != 0)
     {
-      const bhl::Chord chord =
-          bhl::buildChord(root, quality, static_cast<bhl::Inversion>(state.inversion.load()));
+      const bhl::ScaleSelection sel{bhl::ScaleFamily::Minor6, 9};
+      const bhl::Chord chord = bhl::buildStackedChord(sel, 72, bhl::VoicingType::Close);
       for (int i = 0; i < chord.count; ++i)
       {
         state.chordOn(chord.notes[i]);
         state.noteOn(chord.notes[i]);
       }
-      state.rootKey.store(root);
+      state.rootKey.store(72);
+      // The notes that identified the scale, held down.
+      for (int k : {57, 60, 64, 66}) state.controlOn(k);
     }
 
     NSView *view = (NSView *)bhl::guiCreate(&state);
@@ -58,10 +54,10 @@ int main(int argc, const char **argv)
     NSString *path = [NSString stringWithUTF8String:argv[1]];
     if (![png writeToFile:path atomically:YES])
     {
-      printf("failed to write %s\n", argv[1]);
+      printf("failed to write %s\n", path.UTF8String);
       return 1;
     }
-    printf("wrote %s (%.0fx%.0f)\n", argv[1], [view bounds].size.width,
+    printf("wrote %s (%.0fx%.0f)\n", path.UTF8String, [view bounds].size.width,
            [view bounds].size.height);
 
     bhl::guiDestroy(view);

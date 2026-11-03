@@ -1,5 +1,6 @@
-// Chord generation logic. Free of any plugin API types so it can be unit tested on its
-// own.
+// Barry Harris's stacked diminished scales.
+//
+// Free of any plugin API types so it can be unit tested on its own.
 #pragma once
 
 #include <cstdint>
@@ -7,75 +8,76 @@
 namespace bhl
 {
 
-enum class Quality : int
+// The four chord scales of the Barry Harris method. Each is an eight-note diminished
+// scale; stacked one note at a time (skipping a note between voices) it yields 4-note
+// chords alternating between the family's own chord and the diminished chord, each in
+// its four inversions.
+enum class ScaleFamily : int
 {
-  Major = 0,
-  Minor,
-  Maj7,
-  Min7,
-  Six,
-  Dom7,
-  Sus4,
+  Major6 = 0,
+  Minor6,
+  Seven,
+  SevenB5,
   Count
 };
 
-enum class Inversion : int
+// How a trigger chord is stacked. The first version offers close position only, with
+// the pressed note as the top note of the chord.
+enum class VoicingType : int
 {
-  Root = 0,
-  First,
-  Second,
-  Third,
-  OctaveDouble,
+  Close = 0,
   Count
 };
 
-// A close-position voicing uses at most five notes (four plus a doubled root).
-static constexpr int kMaxVoices = 5;
+static constexpr int kScaleNoteCount = 8;
+static constexpr int kStackedChordNotes = 4;
 
 struct Chord
 {
-  int notes[kMaxVoices] = {};
+  int notes[kStackedChordNotes] = {};
   int count = 0;
 };
 
-// Builds a close-position voicing for `rootKey` (a MIDI note number). Voices that fall
-// outside 0..127 are dropped rather than wrapped.
-Chord buildChord(int rootKey, Quality quality, Inversion inversion);
+// Semitone offsets of the family's eight-note scale, relative to its root.
+const int *scaleOffsets(ScaleFamily family);
 
-// How many notes the chord type has: three for the triads, four for the sevenths and 6.
-int chordToneCount(Quality quality);
+// The eight pitch classes of the family's scale, as a 12-bit mask relative to pc 0 (C).
+uint16_t scalePitchClasses(ScaleFamily family);
 
-// A three-note chord has no third inversion -- there is no fourth voice to put in the
-// bass -- so that setting is not offered for one.
-bool inversionAvailable(Quality quality, Inversion inversion);
+// The 4-note chord that belongs to the family, as pitch classes relative to its root
+// (e.g. {0, 4, 7, 9} for major 6th).
+uint16_t namedChordPitchClasses(ScaleFamily family);
 
-// Chord type in the compact notation players read at a glance: maj, m, maj7, m7, 6, 7,
-// sus4.
-const char *chordTypeName(Quality quality);
+// The diminished chord shared by all four families, as pitch classes relative to its
+// own root: {0, 3, 6, 9}.
+uint16_t dimChordPitchClasses(int rootPc);
 
-// The suffix used when the chord is written out with its root, so Major is empty and the
-// chord reads "E" rather than "Emaj".
-const char *chordTypeSymbol(Quality quality);
-
-const char *inversionName(Inversion inversion);       // "1st inversion"
-const char *inversionShortName(Inversion inversion);  // "1st", for drawing on a key
-
-// What a key in the control octave does. `semitoneOffset` is 0..11 relative to the
-// control zone root.
-enum class ControlAction : int
+// The scale that a set of pressed notes identifies.
+struct ScaleSelection
 {
-  None = 0,
-  SetQuality,
-  SetInversion
+  ScaleFamily family = ScaleFamily::Major6;
+  int keyPc = 0;  // Pitch class of the family root.
 };
 
-struct ControlHit
-{
-  ControlAction action = ControlAction::None;
-  int value = 0;  // Quality or Inversion, depending on `action`.
-};
+// Identifies the scale from a 12-bit mask of held pitch classes.
+//
+// Matching is tiered: a named chord rooted at the lowest pressed class, then the
+// dim chord rooted there, then a named chord at any key, then the dim chord at any
+// key -- families in preference order (major 6th > minor 6th > 7th > 7th b5)
+// within each tier. Returns false when the mask matches no scale; in that case
+// *out is left as it was, so the caller keeps the last valid selection.
+bool selectScale(uint16_t pitchClassMask, ScaleSelection *out);
 
-// White keys select quality, black keys select inversion.
-ControlHit mapControlKey(int semitoneOffset);
+// The close-position stacked chord of the selected scale with `topKey` as its top
+// note. Returns a chord of count 0 if the note is not in the scale; voices that
+// fall outside 0..127 are dropped rather than wrapped.
+Chord buildStackedChord(const ScaleSelection &sel, int topKey, VoicingType voicing);
+
+// "major 6th dim", for the interface.
+const char *scaleFamilyName(ScaleFamily family);
+// "6°", "m6°", "7°", "7b5°", for a button.
+const char *scaleFamilyShortName(ScaleFamily family);
+// "Close", for a voicing button.
+const char *voicingTypeName(VoicingType voicing);
 
 }  // namespace bhl

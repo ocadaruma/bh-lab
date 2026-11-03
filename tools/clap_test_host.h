@@ -209,9 +209,8 @@ inline const clap_plugin_t *makePlugin()
 }
 
 // Parameter ids, matching the plugin's table.
-constexpr clap_id kQuality = 0;
-constexpr clap_id kInversion = 1;
-constexpr clap_id kControlRoot = 2;
-constexpr clap_id kTriggerStart = 3;
+constexpr clap_id kVoicing = 0;
+constexpr clap_id kControlRoot = 1;
+constexpr clap_id kTriggerStart = 2;
 
 }  // namespace bhl_test

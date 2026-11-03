@@ -1,8 +1,10 @@
-// bh-lab: an AU note effect that turns single keys into chords.
+// bh-lab: an AU note effect based on Barry Harris's stacked diminished scales.
 //
-// Keys in the control octave latch chord quality (white keys) and inversion (black
-// keys); keys in the trigger zone each generate a close-position chord rooted on the
-// key pressed.
+// Notes held in the control octave identify the scale -- the family (major 6th, minor
+// 6th, 7th or 7th b5 diminished) and its key -- and the identification follows the
+// held notes live. Keys in the trigger zone each sound the close-position stack of
+// the selected scale with the pressed note on top; a trigger key outside the scale
+// passes through untouched.
 //
 // Written against the plain CLAP C API; the AUv2 wrapper turns it into a .component.
 
@@ -30,10 +32,9 @@ namespace
 
 enum ParamId : clap_id
 {
-  kParamQuality = 0,
-  kParamInversion = 1,
-  kParamControlRoot = 2,
-  kParamTriggerStart = 3,
+  kParamVoicing = 0,
+  kParamControlRoot = 1,
+  kParamTriggerStart = 2,
   kNumParams
 };
 
@@ -48,8 +49,7 @@ struct ParamDef
 };
 
 const ParamDef kParamDefs[kNumParams] = {
-    {kParamQuality, "Chord Type", 0, static_cast<double>(Quality::Count) - 1, 0, true},
-    {kParamInversion, "Inversion", 0, static_cast<double>(Inversion::Count) - 1, 0, true},
+    {kParamVoicing, "Voicing", 0, static_cast<double>(VoicingType::Count) - 1, 0, true},
     // Note names follow Logic's convention, where middle C (MIDI 60) is C3.
     {kParamControlRoot, "Control Zone Root", 0, 115, 48, true},    // C2
     {kParamTriggerStart, "Trigger Zone Start", 0, 127, 60, true},  // C3
@@ -58,11 +58,12 @@ const ParamDef kParamDefs[kNumParams] = {
 static_assert(sizeof(kParamDefs) / sizeof(kParamDefs[0]) == kNumParams,
               "parameter table out of sync with the ids");
 
-// Parameter ids are the host's handle on automation: a lane written against an id will be
-// replayed into whatever that id means later. New parameters are appended at the end,
-// never inserted.
-static_assert(kParamQuality == 0 && kParamInversion == 1, "ids are frozen");
-static_assert(kParamControlRoot == 2 && kParamTriggerStart == 3, "ids are frozen");
+// Parameter ids are the host's handle on automation: a lane written against an id will
+// be replayed into whatever that id means later. New parameters are appended at the end,
+// never inserted. The old ids (quality, inversion) belonged to the abandoned chord
+// quality feature and are not reused.
+static_assert(kParamVoicing == 0 && kParamControlRoot == 1 && kParamTriggerStart == 2,
+              "ids are frozen");
 
 const char *kNoteNames[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 
@@ -75,6 +76,22 @@ void formatNoteName(int key, char *out, size_t cap)
     return;
   }
   snprintf(out, cap, "%s%d", kNoteNames[key % 12], (key / 12) - 2);
+}
+
+// ---------------------------------------------------------------------------
+// Scale selection state
+// ---------------------------------------------------------------------------
+
+// The latched scale: which family and at which key the held control notes were last
+// identified. Encoded as family * 12 + key pitch class, one atomic.
+int encodeSelection(const ScaleSelection &sel)
+{
+  return static_cast<int>(sel.family) * 12 + sel.keyPc;
+}
+
+ScaleSelection decodeSelection(int encoded)
+{
+  return {static_cast<ScaleFamily>(encoded / 12), encoded % 12};
 }
 
 // ---------------------------------------------------------------------------
@@ -95,7 +112,7 @@ struct HeldChord
   {
     int32_t noteId = -1;
     int16_t key = 0;
-  } voices[kMaxVoices];
+  } voices[kStackedChordNotes];
 };
 
 constexpr int kMaxHeldChords = 32;
@@ -109,6 +126,12 @@ struct Bhl
   std::atomic<bool> pendingRescan = {false};
 
   std::atomic<double> params[kNumParams];
+
+  std::atomic<int> selection = {0};  // C major 6th diminished until identified otherwise.
+
+  // Control-zone keys currently held, per (channel, key): counted, since a key can be
+  // struck again before it is released.
+  uint8_t controlHeld[16][128] = {};
 
   HeldChord held[kMaxHeldChords];
   int32_t nextNoteId = 0;
@@ -125,13 +148,13 @@ struct Bhl
     int16_t channel = 0;
     int16_t key = 0;
   };
-  static constexpr int kMaxPendingOffs = kMaxHeldChords * kMaxVoices;
+  static constexpr int kMaxPendingOffs = kMaxHeldChords * kStackedChordNotes;
   PendingOff pendingOffs[kMaxPendingOffs];
 
   // Keys that were forwarded to the instrument untouched. A note-on and its note-off have
-  // to be treated the same way even if the zone boundaries moved in between. Counted
-  // rather than flagged, since a key can legitimately be struck again before it is
-  // released and both note-offs must be forwarded.
+  // to be treated the same way even if the selection moved in between. Counted rather
+  // than flagged, since a key can legitimately be struck again before it is released and
+  // both note-offs must be forwarded.
   uint8_t forwarded[16][128] = {};
 
   GuiState gui;
@@ -152,10 +175,10 @@ struct Bhl
   // Mirrors the parameters the view draws. Cheap enough to call per event.
   void publishToGui()
   {
-    gui.quality.store(paramInt(kParamQuality), std::memory_order_relaxed);
-    gui.inversion.store(paramInt(kParamInversion), std::memory_order_relaxed);
+    gui.voicing.store(paramInt(kParamVoicing), std::memory_order_relaxed);
     gui.controlRoot.store(paramInt(kParamControlRoot), std::memory_order_relaxed);
     gui.triggerStart.store(paramInt(kParamTriggerStart), std::memory_order_relaxed);
+    gui.selection.store(selection.load(std::memory_order_relaxed), std::memory_order_relaxed);
   }
 };
 
@@ -264,6 +287,48 @@ bool passThrough(const clap_output_events_t *out, const clap_event_header_t *ev)
   return out->try_push(out, ev);
 }
 
+// Stores a parameter without telling the host a gesture happened. Used when a value
+// arrives through a path that is not a user gesture (automation, saved state, the UI
+// queue, which pushes its own gesture).
+void sanitizeAndStore(Bhl *rc, const clap_event_param_value_t *ev)
+{
+  rc->params[static_cast<int>(ev->param_id)].store(sanitizeParam(ev->param_id, ev->value),
+                                                   std::memory_order_relaxed);
+}
+
+// Asks the host to re-read every parameter, and to notice the project has changed. Both
+// are main-thread calls, so they are deferred.
+void requestValueRescan(Bhl *rc)
+{
+  rc->pendingRescan.store(true, std::memory_order_relaxed);
+  if (rc->host && rc->host->request_callback) rc->host->request_callback(rc->host);
+}
+
+void drainGuiRequests(Bhl *rc, const clap_output_events_t *out, uint32_t time)
+{
+  GuiState::PendingRequest request;
+  while (rc->gui.popRequest(&request))
+  {
+    ParamId id = kParamVoicing;
+    switch (request.what)
+    {
+      case GuiState::Request::Voicing:
+        id = kParamVoicing;
+        break;
+      case GuiState::Request::ControlRoot:
+        id = kParamControlRoot;
+        break;
+      case GuiState::Request::TriggerStart:
+        id = kParamTriggerStart;
+        break;
+    }
+
+    const double value = sanitizeParam(id, request.value);
+    rc->params[id].store(value, std::memory_order_relaxed);
+    if (!pushParam(out, time, id, value)) requestValueRescan(rc);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Chord voice bookkeeping
 // ---------------------------------------------------------------------------
@@ -342,19 +407,80 @@ bool releaseAllMatching(Bhl *rc, int16_t channel, int16_t key, const clap_output
   return released;
 }
 
-void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_output_events_t *out)
+// ---------------------------------------------------------------------------
+// Zone classification
+// ---------------------------------------------------------------------------
+
+enum class Zone
+{
+  Control,
+  Trigger,
+  Below
+};
+
+Zone zoneOf(Bhl *rc, int key)
+{
+  const int controlRoot = rc->paramInt(kParamControlRoot);
+  const int triggerStart = rc->paramInt(kParamTriggerStart);
+
+  // The control zone wins if the two zones are configured to overlap.
+  if (key >= controlRoot && key < controlRoot + 12) return Zone::Control;
+  if (key >= triggerStart) return Zone::Trigger;
+  return Zone::Below;
+}
+
+// A control-zone press is silent, but it drives which scale is in force: the held
+// control notes identify the scale on every press, and the last valid identification
+// is kept afterwards. A release shrinks the held set but is not re-identified from,
+// since releasing notes cannot add information and re-identifying on the way down
+// would latch the partial sets' selections.
+void handleControlKey(Bhl *rc, const clap_event_note_t *note, bool on)
+{
+  if (note->key < 0 || note->key > 127) return;
+
+  const int ch = note->channel < 0 ? 0 : (note->channel & 0xf);
+  if (on)
+  {
+    if (rc->controlHeld[ch][note->key] < 255) ++rc->controlHeld[ch][note->key];
+    rc->gui.controlOn(note->key);
+  }
+  else
+  {
+    if (rc->controlHeld[ch][note->key] > 0) --rc->controlHeld[ch][note->key];
+    rc->gui.controlOff(note->key);
+  }
+
+  if (!on) return;
+
+  uint16_t mask = 0;
+  for (int c = 0; c < 16; ++c)
+    for (int k = 0; k < 128; ++k)
+      if (rc->controlHeld[c][k]) mask |= 1u << (k % 12);
+
+  ScaleSelection sel = decodeSelection(rc->selection.load(std::memory_order_relaxed));
+  if (selectScale(mask, &sel))
+    rc->selection.store(encodeSelection(sel), std::memory_order_relaxed);
+}
+
+void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_header_t *hdr,
+                  const clap_output_events_t *out)
 {
   // Re-triggering a key that is already sounding releases the previous chord first.
   releaseAllMatching(rc, note->channel, note->key, out, note->header.time, 0.0);
 
+  const ScaleSelection sel = decodeSelection(rc->selection.load(std::memory_order_relaxed));
+  const auto voicing = static_cast<VoicingType>(rc->paramInt(kParamVoicing));
+  const Chord chord = buildStackedChord(sel, note->key, voicing);
+
+  // A note outside the selected scale is passed through untouched.
+  if (chord.count == 0)
+  {
+    if (passThrough(out, hdr)) markForwarded(rc, note->channel, note->key);
+    return;
+  }
+
   HeldChord *held = allocHeld(rc);
   if (!held) return;  // Out of slots: better to drop the chord than to leak notes.
-
-  const auto quality = static_cast<Quality>(rc->paramInt(kParamQuality));
-  const auto inversion = static_cast<Inversion>(rc->paramInt(kParamInversion));
-  Chord chord = buildChord(note->key, quality, inversion);
-
-  if (chord.count == 0) return;
 
   const int16_t channel = note->channel < 0 ? 0 : note->channel;
 
@@ -386,91 +512,6 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_output_even
   rc->gui.rootKey.store(note->key, std::memory_order_relaxed);
 }
 
-// Sets a parameter without telling the host a gesture happened. Used when the UI and the
-// audio thread share one change, so the host is not told twice.
-void setParamQuietly(Bhl *rc, ParamId id, double value)
-{
-  rc->params[id].store(sanitizeParam(id, value), std::memory_order_relaxed);
-}
-
-// Asks the host to re-read every parameter, and to notice the project has changed. Both
-// are main-thread calls, so they are deferred.
-void requestValueRescan(Bhl *rc)
-{
-  rc->pendingRescan.store(true, std::memory_order_relaxed);
-  if (rc->host && rc->host->request_callback) rc->host->request_callback(rc->host);
-}
-
-void drainGuiRequests(Bhl *rc, const clap_output_events_t *out, uint32_t time)
-{
-  GuiState::PendingRequest request;
-  while (rc->gui.popRequest(&request))
-  {
-    ParamId id = kParamQuality;
-    switch (request.what)
-    {
-      case GuiState::Request::Quality:
-        id = kParamQuality;
-        break;
-      case GuiState::Request::Inversion:
-        id = kParamInversion;
-        break;
-      case GuiState::Request::ControlRoot:
-        id = kParamControlRoot;
-        break;
-      case GuiState::Request::TriggerStart:
-        id = kParamTriggerStart;
-        break;
-    }
-
-    const double value = sanitizeParam(id, request.value);
-    rc->params[id].store(value, std::memory_order_relaxed);
-    if (!pushParam(out, time, id, value)) requestValueRescan(rc);
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Zone classification
-// ---------------------------------------------------------------------------
-
-enum class Zone
-{
-  Control,
-  Trigger,
-  Below
-};
-
-Zone zoneOf(Bhl *rc, int key)
-{
-  const int controlRoot = rc->paramInt(kParamControlRoot);
-  const int triggerStart = rc->paramInt(kParamTriggerStart);
-
-  // The control zone wins if the two zones are configured to overlap.
-  if (key >= controlRoot && key < controlRoot + 12) return Zone::Control;
-  if (key >= triggerStart) return Zone::Trigger;
-  return Zone::Below;
-}
-
-void handleControlKey(Bhl *rc, const clap_event_note_t *note, const clap_output_events_t *out)
-{
-  const int offset = note->key - rc->paramInt(kParamControlRoot);
-  const ControlHit hit = mapControlKey(offset);
-
-  switch (hit.action)
-  {
-    case ControlAction::SetQuality:
-      setParamQuietly(rc, kParamQuality, hit.value);
-      pushParam(out, note->header.time, kParamQuality, hit.value);
-      break;
-    case ControlAction::SetInversion:
-      setParamQuietly(rc, kParamInversion, hit.value);
-      pushParam(out, note->header.time, kParamInversion, hit.value);
-      break;
-    case ControlAction::None:
-      break;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Event dispatch
 // ---------------------------------------------------------------------------
@@ -485,7 +526,7 @@ void handleEvent(Bhl *rc, const clap_event_header_t *hdr, const clap_output_even
     {
       const auto *ev = reinterpret_cast<const clap_event_param_value_t *>(hdr);
       if (ev->param_id >= kNumParams) break;
-      setParamQuietly(rc, static_cast<ParamId>(ev->param_id), ev->value);
+      sanitizeAndStore(rc, ev);
       break;
     }
 
@@ -495,10 +536,10 @@ void handleEvent(Bhl *rc, const clap_event_header_t *hdr, const clap_output_even
       switch (zoneOf(rc, note->key))
       {
         case Zone::Control:
-          handleControlKey(rc, note, out);  // Latches state; never sounds.
+          handleControlKey(rc, note, true);  // Identifies the scale; never sounds.
           break;
         case Zone::Trigger:
-          triggerChord(rc, note, out);
+          triggerChord(rc, note, hdr, out);
           break;
         case Zone::Below:
           // Forwarded untouched, and remembered as forwarded if it went.
@@ -514,6 +555,11 @@ void handleEvent(Bhl *rc, const clap_event_header_t *hdr, const clap_output_even
       const auto *note = reinterpret_cast<const clap_event_note_t *>(hdr);
       const uint16_t outType =
           hdr->type == CLAP_EVENT_NOTE_CHOKE ? CLAP_EVENT_NOTE_CHOKE : CLAP_EVENT_NOTE_OFF;
+
+      // Control-zone bookkeeping: a release updates the held set even for keys that own
+      // no chord. (For trigger keys this is a no-op; a key's control count can only be
+      // nonzero from a control press.)
+      handleControlKey(rc, note, false);
 
       // Release by what the key owns rather than by where the zones sit now: the
       // boundaries are parameters and may have moved since the key went down. Deciding
@@ -607,11 +653,8 @@ bool CLAP_ABI paramsValueToText(const clap_plugin_t *, clap_id id, double value,
 
   switch (id)
   {
-    case kParamQuality:
-      snprintf(out, cap, "%s", chordTypeName(static_cast<Quality>(v)));
-      return true;
-    case kParamInversion:
-      snprintf(out, cap, "%s", inversionName(static_cast<Inversion>(v)));
+    case kParamVoicing:
+      snprintf(out, cap, "%s", voicingTypeName(static_cast<VoicingType>(v)));
       return true;
     case kParamControlRoot:
     case kParamTriggerStart:
@@ -632,17 +675,9 @@ bool CLAP_ABI paramsTextToValue(const clap_plugin_t *, clap_id id, const char *t
 
   switch (id)
   {
-    case kParamQuality:
-      for (int i = 0; i < static_cast<int>(Quality::Count); ++i)
-        if (strcasecmp(text, chordTypeName(static_cast<Quality>(i))) == 0)
-        {
-          *out = i;
-          return true;
-        }
-      break;
-    case kParamInversion:
-      for (int i = 0; i < static_cast<int>(Inversion::Count); ++i)
-        if (strcasecmp(text, inversionName(static_cast<Inversion>(i))) == 0)
+    case kParamVoicing:
+      for (int i = 0; i < static_cast<int>(VoicingType::Count); ++i)
+        if (strcasecmp(text, voicingTypeName(static_cast<VoicingType>(i))) == 0)
         {
           *out = i;
           return true;
@@ -673,7 +708,7 @@ void CLAP_ABI paramsFlush(const clap_plugin_t *plugin, const clap_input_events_t
     {
       const auto *ev = reinterpret_cast<const clap_event_param_value_t *>(hdr);
       if (ev->param_id >= kNumParams) continue;
-      setParamQuietly(rc, static_cast<ParamId>(ev->param_id), ev->value);
+      sanitizeAndStore(rc, ev);
     }
   }
   rc->publishToGui();
@@ -735,16 +770,17 @@ const clap_plugin_audio_ports_t kAudioPortsExtension = {audioPortsCount, audioPo
 // clap_plugin_state
 // ---------------------------------------------------------------------------
 
-constexpr uint32_t kStateVersion = 1;
+constexpr uint32_t kStateVersion = 2;
 
 bool CLAP_ABI stateSave(const clap_plugin_t *plugin, const clap_ostream_t *stream)
 {
   Bhl *rc = self(plugin);
 
-  double blob[2 + kNumParams];
+  double blob[2 + kNumParams + 1];
   blob[0] = kStateVersion;
   blob[1] = kNumParams;
   for (int i = 0; i < kNumParams; ++i) blob[2 + i] = rc->paramValue(static_cast<ParamId>(i));
+  blob[2 + kNumParams] = rc->selection.load(std::memory_order_relaxed);
 
   const auto *bytes = reinterpret_cast<const uint8_t *>(blob);
   uint64_t remaining = sizeof(blob);
@@ -764,10 +800,11 @@ bool CLAP_ABI stateLoad(const clap_plugin_t *plugin, const clap_istream_t *strea
 
   // Seeded with the values in force, so a stream that ends early leaves those parameters
   // as they are instead of collapsing them to their minimum.
-  double blob[2 + kNumParams];
+  double blob[2 + kNumParams + 1];
   blob[0] = 0;
   blob[1] = 0;
   for (int i = 0; i < kNumParams; ++i) blob[2 + i] = rc->paramValue(static_cast<ParamId>(i));
+  blob[2 + kNumParams] = rc->selection.load(std::memory_order_relaxed);
 
   auto *bytes = reinterpret_cast<uint8_t *>(blob);
   uint64_t remaining = sizeof(blob);
@@ -788,6 +825,9 @@ bool CLAP_ABI stateLoad(const clap_plugin_t *plugin, const clap_istream_t *strea
 
   for (int i = 0; i < kNumParams; ++i)
     rc->params[i].store(sanitizeParam(i, blob[2 + i]), std::memory_order_relaxed);
+  const double sel = blob[2 + kNumParams];
+  if (std::isfinite(sel) && sel >= 0 && sel < static_cast<double>(ScaleFamily::Count) * 12)
+    rc->selection.store(static_cast<int>(std::round(sel)), std::memory_order_relaxed);
   return true;
 }
 
@@ -923,8 +963,9 @@ const clap_plugin_descriptor_t kDescriptor = {
     "https://github.com/",
     "",
     "",
-    "0.1.0",
-    "Turns single keys into chords, with quality and inversion chosen from a control octave.",
+    "0.2.0",
+    "Barry Harris's stacked diminished scales: the control octave identifies the scale, "
+    "and trigger keys sound its stacked chords.",
     kFeatures};
 
 void requestHostFlush(void *context)
@@ -987,6 +1028,7 @@ void CLAP_ABI pluginReset(const clap_plugin_t *plugin)
   rc->heldCount = 0;
   for (auto &pending : rc->pendingOffs) pending.active = false;
   std::memset(rc->forwarded, 0, sizeof(rc->forwarded));
+  std::memset(rc->controlHeld, 0, sizeof(rc->controlHeld));
   rc->gui.allNotesOff();
 }
 

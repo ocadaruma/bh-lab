@@ -1,21 +1,25 @@
 # bh-lab
 
-An Audio Unit note effect that turns single keys into chords.
+An Audio Unit note effect based on **Barry Harris's stacked diminished scales**
+(see `design.md` and `chord-to-scale-uniqueness.md`).
 
-- Keys in the **control octave** latch the chord **quality** (white keys) and **inversion**
-  (black keys). They are silent and stay in effect until changed.
-- Keys in the **trigger zone** each generate a close-position chord rooted on the key
-  pressed.
-- Notes below both zones pass through untouched.
+- Notes **held in the control octave** identify the scale: which of the four chord
+  scales (major 6th, minor 6th, 7th or 7th b5 diminished) and at which key. The
+  identification follows the held notes live and is latched when they are released;
+  when the held notes are ambiguous the families are preferred in the order
+  6° > m6° > 7° > 7b5°.
+- Keys in the **trigger zone** sound the close-position stack of the selected scale
+  with the pressed note on top (e.g. C major 6th, E4 pressed → G3 A3 C4 E4). A
+  trigger key outside the selected scale is passed through untouched.
+- The **voicing type** is a parameter; the first version supports close position only.
 
 Parameters (automatable):
 
 | id | name | range | default |
 |----|------|-------|---------|
-| 0 | Chord Type | maj, m, maj7, m7, 6, 7, sus4 | maj |
-| 1 | Inversion | root, 1st, 2nd, 3rd, octave double | root |
-| 2 | Control Zone Root | C-2 .. B5 | C2 |
-| 3 | Trigger Zone Start | C-1 .. G9 | C3 |
+| 0 | Voicing | Close | Close |
+| 1 | Control Zone Root | C-2 .. G5 | C2 |
+| 2 | Trigger Zone Start | C-1 .. G9 | C3 |
 
 ## Building
 
@@ -44,20 +48,22 @@ integration checks:
 
 ## Layout
 
-- `src/chord_engine.{h,cpp}` — chord generation, free of any plugin API.
+- `src/chord_engine.{h,cpp}` — the four chord scales, scale identification and stacked
+  chord building, free of any plugin API.
 - `src/bhl_plugin.cpp` — the CLAP plugin (parameters, event routing, state, ports).
-- `src/bhl_gui.{h,mm}` — the Cocoa view: the generated-chord keyboard and the control
-  octave.
+- `src/bhl_gui.{h,mm}` — the Cocoa view: the selected scale, the generated-chord
+  keyboard and the control octave.
 - `src/bhl_entry.{h,cpp}` — the CLAP entry point.
-- `deps/` — git submodules: CLAP SDK, AudioUnit SDK and clap-wrapper (pinned in `.gitmodules`; clone with `--recursive`).
+- `deps/` — git submodules: CLAP SDK, AudioUnit SDK and clap-wrapper (pinned in
+  `.gitmodules`; clone with `--recursive`).
 - `tools/` — a synthetic CLAP host (`basics-test`) and a view renderer (`gui-preview`).
 
 ## Design notes
 
 - All plugin logic lives in the `bh-lab-impl` static library; the AU format is just its
   entry-point translation unit plus the wrapper.
-- Parameter ids are frozen: automation written against an id replays into whatever that id
-  means later, so parameters are only ever appended, never inserted.
+- Parameter ids are frozen: automation written against an id replays into whatever that
+  id means later, so parameters are only ever appended, never inserted.
 - Chords are released by the note ids they were started with; note-offs the host's queue
   refuses are held and retried on the next block, so a release is never dropped.
 - The window is fixed size; the view redraws on a timer only when the audio thread's
