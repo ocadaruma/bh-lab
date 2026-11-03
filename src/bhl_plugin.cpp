@@ -132,6 +132,9 @@ struct Bhl
   // Control-zone keys currently held, per (channel, key): counted, since a key can be
   // struck again before it is released.
   uint8_t controlHeld[16][128] = {};
+  // How many distinct control keys are held. When this is zero the plugin is in
+  // pass-through mode: no scale is in force, so trigger keys sound nothing.
+  uint8_t controlHeldKeys = 0;
 
   HeldChord held[kMaxHeldChords];
   int32_t nextNoteId = 0;
@@ -433,7 +436,8 @@ Zone zoneOf(Bhl *rc, int key)
 // control notes identify the scale on every press, and the last valid identification
 // is kept afterwards. A release shrinks the held set but is not re-identified from,
 // since releasing notes cannot add information and re-identifying on the way down
-// would latch the partial sets' selections.
+// would latch the partial sets' selections. When the held set becomes empty the plugin
+// is in pass-through mode: no scale is in force, so trigger keys sound nothing.
 void handleControlKey(Bhl *rc, const clap_event_note_t *note, bool on)
 {
   if (note->key < 0 || note->key > 127) return;
@@ -441,12 +445,17 @@ void handleControlKey(Bhl *rc, const clap_event_note_t *note, bool on)
   const int ch = note->channel < 0 ? 0 : (note->channel & 0xf);
   if (on)
   {
+    if (rc->controlHeld[ch][note->key] == 0) ++rc->controlHeldKeys;
     if (rc->controlHeld[ch][note->key] < 255) ++rc->controlHeld[ch][note->key];
     rc->gui.controlOn(note->key);
   }
   else
   {
-    if (rc->controlHeld[ch][note->key] > 0) --rc->controlHeld[ch][note->key];
+    if (rc->controlHeld[ch][note->key] > 0)
+    {
+      --rc->controlHeld[ch][note->key];
+      if (rc->controlHeld[ch][note->key] == 0) --rc->controlHeldKeys;
+    }
     rc->gui.controlOff(note->key);
   }
 
@@ -539,6 +548,13 @@ void handleEvent(Bhl *rc, const clap_event_header_t *hdr, const clap_output_even
           handleControlKey(rc, note, true);  // Identifies the scale; never sounds.
           break;
         case Zone::Trigger:
+          // With nothing held in the control zone no scale is in force, so the key
+          // passes through untouched rather than sounding a latched scale's stack.
+          if (rc->controlHeldKeys == 0)
+          {
+            if (passThrough(out, hdr)) markForwarded(rc, note->channel, note->key);
+            break;
+          }
           triggerChord(rc, note, hdr, out);
           break;
         case Zone::Below:
@@ -1029,6 +1045,7 @@ void CLAP_ABI pluginReset(const clap_plugin_t *plugin)
   for (auto &pending : rc->pendingOffs) pending.active = false;
   std::memset(rc->forwarded, 0, sizeof(rc->forwarded));
   std::memset(rc->controlHeld, 0, sizeof(rc->controlHeld));
+  rc->controlHeldKeys = 0;
   rc->gui.allNotesOff();
 }
 

@@ -50,6 +50,8 @@ Based on Barry Harris's diminished scale, the plugin triggers a chord
     * if only C is pressed, it falls into major 6th diminished scale
     * if C and Eb are pressed, it falls into minor 6th diminished scale
     * ...
+- When no note is held in the control zone, the plugin is in pass-through mode: trigger
+  keys pass through untouched instead of sounding the last selected scale's stack
 
 ## trigger zone
 

@@ -5,9 +5,10 @@ An Audio Unit note effect based on **Barry Harris's stacked diminished scales**
 
 - Notes **held in the control octave** identify the scale: which of the four chord
   scales (major 6th, minor 6th, 7th or 7th b5 diminished) and at which key. The
-  identification follows the held notes live and is latched when they are released;
-  when the held notes are ambiguous the families are preferred in the order
-  6° > m6° > 7° > 7b5°.
+  identification follows the held notes live and is latched while they are held or
+  released; when the held notes are ambiguous the families are preferred in the order
+  6° > m6° > 7° > 7b5°. While nothing is held in the control octave the plugin is in
+  pass-through mode: trigger keys pass through untouched.
 - Keys in the **trigger zone** sound the close-position stack of the selected scale
   with the pressed note on top (e.g. C major 6th, E4 pressed → G3 A3 C4 E4). A
   trigger key outside the selected scale is passed through untouched.

@@ -58,8 +58,10 @@ int main()
   Timeline timeline(plugin);
 
   // --- stacked chords of the default scale ------------------------------------
-  // Default selection is C major 6th diminished. C3 on top -> E3 G3 A3 C3.
+  // The default selection is C major 6th diminished; C2 held keeps it in force. C3 on
+  // top -> E3 G3 A3 C3.
   reset(plugin, &timeline);
+  holdControl(&timeline, {48});  // C2
   {
     InputEvents press;
     press.addNote(CLAP_EVENT_NOTE_ON, 0, 60, 0.8);
@@ -98,9 +100,16 @@ int main()
     timeline.run(&release);
   }
   expect("releasing E4 stops the chord", !g_emitted.empty(), describe(g_emitted));
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 48, 0.0);
+    timeline.run(&release);
+  }
 
   // A note outside the selected scale passes through untouched.
   reset(plugin, &timeline);
+  holdControl(&timeline, {48});  // C2: C major 6th in force
   {
     InputEvents press;
     press.addNote(CLAP_EVENT_NOTE_ON, 0, 70, 0.7);  // Bb3, not in C major 6th
@@ -121,6 +130,45 @@ int main()
     const std::vector<Emitted> first = g_emitted;
     expect("its note-off passes through too",
            first.size() == 1 && !first[0].on && first[0].key == 70, describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 48, 0.0);
+    timeline.run(&release);
+  }
+
+  // With nothing held in the control zone the plugin is in pass-through mode: a
+  // trigger key sounds nothing, even though a scale was latched before.
+  reset(plugin, &timeline);
+  holdControl(&timeline, {48});
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 48, 0.0);
+    timeline.run(&release);
+  }
+  expect("the last control release is silent", g_emitted.empty(), describe(g_emitted));
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 60, 0.8);
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    expect("with nothing held, C3 passes through untouched",
+           first.size() == 1 && first[0].on && first[0].key == 60, describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 60, 0.0);
+    timeline.run(&release);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    expect("its note-off passes through too",
+           first.size() == 1 && !first[0].on && first[0].key == 60, describe(first));
   }
 
   // --- scale selection from the control octave ---------------------------------
