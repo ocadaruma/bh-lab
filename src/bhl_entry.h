@@ -9,4 +9,8 @@ extern "C"
   bool bhl_entry_init(const char *plugin_path);
   void bhl_entry_deinit();
   const void *bhl_entry_get_factory(const char *factory_id);
+
+  // Development host tooling only: the plugin's UI state, so a standalone host can
+  // attach the real view to the real core. Not a stable interface.
+  void *bhl_dev_gui_state(const clap_plugin_t *plugin);
 }

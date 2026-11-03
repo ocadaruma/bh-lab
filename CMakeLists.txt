@@ -86,6 +86,12 @@ if(APPLE)
     target_include_directories(gui-preview PRIVATE src)
     target_link_libraries(gui-preview PRIVATE "-framework Cocoa")
 
+    # An interactive standalone host: the real plugin core and the real view, driven by
+    # the computer keyboard, so UI and behaviour can be iterated without Logic.
+    add_executable(dev-host tools/dev_host.mm)
+    target_include_directories(dev-host PRIVATE tools src)
+    target_link_libraries(dev-host PRIVATE bh-lab-impl "-framework Cocoa")
+
     # Runs the plugin core against a synthetic host: the basics of chord triggering.
     add_executable(basics-test tools/basics_test.cpp)
     target_link_libraries(basics-test PRIVATE bh-lab-impl)

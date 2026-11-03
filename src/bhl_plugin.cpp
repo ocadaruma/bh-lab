@@ -1145,4 +1145,9 @@ extern "C"
     if (!strcmp(factoryId, CLAP_PLUGIN_FACTORY_ID)) return &kFactory;
     return nullptr;
   }
+
+  void *bhl_dev_gui_state(const clap_plugin_t *plugin)
+  {
+    return &self(plugin)->gui;
+  }
 }

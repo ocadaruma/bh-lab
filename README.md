@@ -33,6 +33,15 @@ host:
 ./build/gui-preview preview.png playing
 ```
 
+For a live UI (and behaviour) without a host, `dev-host` runs the real plugin core and
+view in a small window driven by the computer keyboard (home row = trigger zone, bottom
+row = control octave; see `tools/dev_host.mm`). Logic is only needed for final
+integration checks:
+
+```sh
+./build/dev-host
+```
+
 ## Layout
 
 - `src/chord_engine.{h,cpp}` — chord generation, free of any plugin API.
