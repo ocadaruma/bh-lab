@@ -40,12 +40,23 @@ host:
 
 For a live UI (and behaviour) without a host, `dev-host` runs the real plugin core and
 view in a small window driven by the computer keyboard (home row = trigger zone, bottom
-row = control octave; see `tools/dev_host.mm`). Logic is only needed for final
-integration checks:
+row = control octave; see `tools/dev_host.mm`):
 
 ```sh
 ./build/dev-host
 ```
+
+For host-facing behaviour there is `au-midi-probe`, which drives the installed
+`.component` the way a host does (state restore, enable-time renders, velocity
+round-trips). Logic is only needed for final integration checks:
+
+```sh
+./build/au-midi-probe
+```
+
+The `deps/clap-wrapper` submodule is pinned to a local commit on top of v0.17.0 that
+carries one fix this project needs (AUv2 velocity rounding, see the submodule's
+clog); a future bump to a newer upstream tag must re-apply it.
 
 ## Layout
 
@@ -69,3 +80,7 @@ integration checks:
   refuses are held and retried on the next block, so a release is never dropped.
 - The window is fixed size; the view redraws on a timer only when the audio thread's
   snapshot changes.
+- While nothing is held in the control octave the plugin is in pass-through mode and the
+  view goes with it: no scale readout, no scale tinting or root in the control octave.
+- Note events in and out are logged to stderr (Console.app under a host) so a note a
+  host reports can be traced to the event that caused it.

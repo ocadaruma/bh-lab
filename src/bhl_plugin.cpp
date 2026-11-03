@@ -11,6 +11,7 @@
 #include <clap/clap.h>
 
 #include <atomic>
+#include <cstdarg>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -25,6 +26,23 @@ using namespace bhl;
 
 namespace
 {
+
+// Debugging: every note event in and out is logged to stderr (Console.app under a
+// host), so a note a host reports as "out of the blue" can be traced to the event
+// that caused it.
+void bhlLog(const char *fmt, ...)
+{
+  char buf[512];
+  va_list ap;
+  va_start(ap, fmt);
+  const int n = vsnprintf(buf, sizeof(buf), fmt, ap);
+  va_end(ap);
+  if (n > 0)
+  {
+    fprintf(stderr, "[bhl] %s\n", buf);
+    fflush(stderr);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Parameters
@@ -222,7 +240,11 @@ bool pushNote(const clap_output_events_t *out, uint16_t type, uint32_t time, int
   ev.channel = channel;
   ev.key = key;
   ev.velocity = velocity;
-  return out->try_push(out, &ev.header);
+  const bool ok = out->try_push(out, &ev.header);
+  bhlLog("push %s key=%d ch=%d vel=%.3f id=%d t=%u ok=%d",
+         type == CLAP_EVENT_NOTE_ON ? "on" : (type == CLAP_EVENT_NOTE_CHOKE ? "choke" : "off"),
+         key, channel, velocity, noteId, time, ok);
+  return ok;
 }
 
 // Returns false if the host would not take the whole gesture, in which case its idea of
@@ -287,7 +309,16 @@ void drainPendingOffs(Bhl *rc, const clap_output_events_t *out, uint32_t time)
 // remember about a forwarded note is only true if it was actually sent.
 bool passThrough(const clap_output_events_t *out, const clap_event_header_t *ev)
 {
-  return out->try_push(out, ev);
+  const bool ok = out->try_push(out, ev);
+  if (ev->type == CLAP_EVENT_NOTE_ON || ev->type == CLAP_EVENT_NOTE_OFF ||
+      ev->type == CLAP_EVENT_NOTE_CHOKE)
+  {
+    const auto *n = reinterpret_cast<const clap_event_note_t *>(ev);
+    bhlLog("forward %s key=%d ch=%d vel=%.3f t=%u ok=%d",
+           ev->type == CLAP_EVENT_NOTE_ON ? "on" : (ev->type == CLAP_EVENT_NOTE_CHOKE ? "choke" : "off"),
+           n->key, n->channel, n->velocity, ev->time, ok);
+  }
+  return ok;
 }
 
 // Stores a parameter without telling the host a gesture happened. Used when a value
@@ -468,7 +499,11 @@ void handleControlKey(Bhl *rc, const clap_event_note_t *note, bool on)
 
   ScaleSelection sel = decodeSelection(rc->selection.load(std::memory_order_relaxed));
   if (selectScale(mask, &sel))
+  {
     rc->selection.store(encodeSelection(sel), std::memory_order_relaxed);
+    bhlLog("select mask=%04x -> family=%d key=%d (heldKeys=%d)", mask, (int)sel.family, sel.keyPc,
+           rc->controlHeldKeys);
+  }
 }
 
 void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_header_t *hdr,
@@ -528,6 +563,15 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
 void handleEvent(Bhl *rc, const clap_event_header_t *hdr, const clap_output_events_t *out)
 {
   if (hdr->space_id != CLAP_CORE_EVENT_SPACE_ID) return;
+
+  if (hdr->type == CLAP_EVENT_NOTE_ON || hdr->type == CLAP_EVENT_NOTE_OFF ||
+      hdr->type == CLAP_EVENT_NOTE_CHOKE)
+  {
+    const auto *n = reinterpret_cast<const clap_event_note_t *>(hdr);
+    bhlLog("in %s key=%d ch=%d vel=%.3f t=%u",
+           hdr->type == CLAP_EVENT_NOTE_ON ? "on" : (hdr->type == CLAP_EVENT_NOTE_CHOKE ? "choke" : "off"),
+           n->key, n->channel, n->velocity, hdr->time);
+  }
 
   switch (hdr->type)
   {
@@ -797,6 +841,8 @@ bool CLAP_ABI stateSave(const clap_plugin_t *plugin, const clap_ostream_t *strea
   blob[1] = kNumParams;
   for (int i = 0; i < kNumParams; ++i) blob[2 + i] = rc->paramValue(static_cast<ParamId>(i));
   blob[2 + kNumParams] = rc->selection.load(std::memory_order_relaxed);
+  bhlLog("stateSave v=%u size=%zu params=[%.1f %.1f %.1f] sel=%d", kStateVersion, sizeof(blob),
+         blob[2], blob[3], blob[4], (int)blob[5]);
 
   const auto *bytes = reinterpret_cast<const uint8_t *>(blob);
   uint64_t remaining = sizeof(blob);
@@ -844,6 +890,8 @@ bool CLAP_ABI stateLoad(const clap_plugin_t *plugin, const clap_istream_t *strea
   const double sel = blob[2 + kNumParams];
   if (std::isfinite(sel) && sel >= 0 && sel < static_cast<double>(ScaleFamily::Count) * 12)
     rc->selection.store(static_cast<int>(std::round(sel)), std::memory_order_relaxed);
+  bhlLog("stateLoad v=%d ok=1 params=[%.1f %.1f %.1f] sel=%d", (int)blob[0], blob[2], blob[3],
+         blob[4], (int)rc->selection.load(std::memory_order_relaxed));
   return true;
 }
 
@@ -1015,6 +1063,8 @@ bool CLAP_ABI pluginActivate(const clap_plugin_t *plugin, double sampleRate, uin
 {
   Bhl *rc = self(plugin);
   rc->sampleRate = sampleRate > 0 ? sampleRate : 48000.0;
+  bhlLog("activate rate=%.1f heldKeys=%d selection=%d", rc->sampleRate, rc->controlHeldKeys,
+         rc->selection.load(std::memory_order_relaxed));
   return true;
 }
 
@@ -1036,6 +1086,7 @@ void CLAP_ABI pluginReset(const clap_plugin_t *plugin)
   // The host is telling us the timeline jumped; it is responsible for silencing the
   // notes we emitted, so just forget them rather than tracking phantom voices.
   Bhl *rc = self(plugin);
+  bhlLog("reset");
   for (auto &h : rc->held)
   {
     h.active = false;

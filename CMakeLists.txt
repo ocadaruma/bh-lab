@@ -96,4 +96,9 @@ if(APPLE)
     add_executable(basics-test tools/basics_test.cpp)
     target_link_libraries(basics-test PRIVATE bh-lab-impl)
     add_test(NAME basics-test COMMAND basics-test)
+
+    # Drives the installed AU the way a host does (state restore before Initialize,
+    # enable-time renders), the only place host-facing behaviour can be seen.
+    add_executable(au-midi-probe tools/au_midi_probe.cpp)
+    target_link_libraries(au-midi-probe PRIVATE "-framework AudioToolbox" "-framework CoreFoundation")
 endif()

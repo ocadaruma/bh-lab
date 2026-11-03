@@ -329,11 +329,14 @@ Snapshot takeSnapshot(GuiState *state)
 }
 
 // Draws one keyboard. `controlOctave` draws the held / in-scale / root highlighting;
-// the bed draws the chord ghost and the sounding notes.
+// `scaleInView` gates the scale tinting and the root, which only make sense while the
+// held control notes put a scale in force. The bed draws the chord ghost and the
+// sounding notes.
 - (void)drawKeyboardInRect:(NSRect)area
                        low:(int)low
                       high:(int)high
              controlOctave:(BOOL)controlOctave
+               scaleInView:(BOOL)scaleInView
 {
   const int whites = whiteCount(low, high);
   if (whites <= 0) return;
@@ -352,10 +355,10 @@ Snapshot takeSnapshot(GuiState *state)
 
     NSColor *fill = gray(0.90);
     if (!controlOctave && _state->isChordNote(key)) fill = chordGhostWhite();
-    if (controlOctave && inScale(key % 12, sel)) fill = inScaleWhite();
+    if (controlOctave && scaleInView && inScale(key % 12, sel)) fill = inScaleWhite();
     if (controlOctave && _state->isControlHeld(key)) fill = accent();
     if (_state->isSounding(key)) fill = key == rootKey ? rootAccent() : accent();
-    if (controlOctave && key % 12 == sel.keyPc) fill = rootAccent();
+    if (controlOctave && scaleInView && key % 12 == sel.keyPc) fill = rootAccent();
 
     [fill setFill];
     NSRectFill(r);
@@ -386,10 +389,10 @@ Snapshot takeSnapshot(GuiState *state)
 
     NSColor *fill = gray(0.17);
     if (!controlOctave && _state->isChordNote(key)) fill = chordGhostBlack();
-    if (controlOctave && inScale(key % 12, sel)) fill = inScaleBlack();
+    if (controlOctave && scaleInView && inScale(key % 12, sel)) fill = inScaleBlack();
     if (controlOctave && _state->isControlHeld(key)) fill = accentDark();
     if (_state->isSounding(key)) fill = key == rootKey ? rootAccent() : accentDark();
-    if (controlOctave && key % 12 == sel.keyPc) fill = rootAccent();
+    if (controlOctave && scaleInView && key % 12 == sel.keyPc) fill = rootAccent();
 
     [fill setFill];
     NSRectFill(r);
@@ -428,6 +431,10 @@ Snapshot takeSnapshot(GuiState *state)
   const ScaleSelection sel = decodeSelectionLocal(_lastDrawn.selection);
   const auto voicing = static_cast<VoicingType>(_lastDrawn.voicing);
 
+  // Pass-through mode: no control notes held, so no scale is in force and the
+  // readouts that describe one go quiet.
+  const bool anyHeld = (_lastDrawn.heldControl[0] | _lastDrawn.heldControl[1]) != 0;
+
   [gray(0.13) setFill];
   NSRectFill([self bounds]);
 
@@ -435,8 +442,10 @@ Snapshot takeSnapshot(GuiState *state)
   const bool holding = (_lastDrawn.chord[0] || _lastDrawn.chord[1]) && rootKey >= 0;
 
   NSString *headline =
-      [NSString stringWithFormat:@"%@ %@", pitchName(sel.keyPc),
-                             [NSString stringWithUTF8String:scaleFamilyName(sel.family)]];
+      anyHeld
+          ? [NSString stringWithFormat:@"%@ %@", pitchName(sel.keyPc),
+                               [NSString stringWithUTF8String:scaleFamilyName(sel.family)]]
+          : @"";
   drawText(headline, NSMakeRect(kPad, 14, 420, 26), 20, holding ? gray(0.96) : gray(0.62),
            NSTextAlignmentLeft, NSFontWeightSemibold);
 
@@ -458,7 +467,7 @@ Snapshot takeSnapshot(GuiState *state)
     [self drawButton:familyButtonRect(i, [self bounds].size.width)
                title:[NSString stringWithUTF8String:scaleFamilyShortName(
                           static_cast<ScaleFamily>(i))]
-            selected:i == static_cast<int>(sel.family)
+            selected:anyHeld && i == static_cast<int>(sel.family)
                inert:i != static_cast<int>(sel.family)];
 
   // Voicing row: the only selectable stacking right now.
@@ -480,7 +489,8 @@ Snapshot takeSnapshot(GuiState *state)
                                      kChordKeyboardHeight)
                        low:kBedLow
                       high:kBedHigh
-             controlOctave:NO];
+             controlOctave:NO
+               scaleInView:NO];
 
   // Control octave.
   drawText([NSString stringWithFormat:@"CONTROL OCTAVE  (%@)", noteName(_lastDrawn.controlRoot)],
@@ -491,7 +501,8 @@ Snapshot takeSnapshot(GuiState *state)
   [self drawKeyboardInRect:controlKeyboardRect()
                        low:_lastDrawn.controlRoot
                       high:_lastDrawn.controlRoot + 11
-             controlOctave:YES];
+             controlOctave:YES
+               scaleInView:anyHeld];
 
   // Legend, in explicit lines so it is never clipped.
   const CGFloat lx = kPad + kControlKeyboardWidth + 26;
