@@ -1,0 +1,9 @@
+[submodule "deps/clap"]
+	path = deps/clap
+	url = https://github.com/free-audio/clap
+[submodule "deps/clap-wrapper"]
+	path = deps/clap-wrapper
+	url = https://github.com/free-audio/clap-wrapper
+[submodule "deps/AudioUnitSDK"]
+	path = deps/AudioUnitSDK
+	url = https://github.com/apple/AudioUnitSDK
