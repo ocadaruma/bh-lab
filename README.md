@@ -54,8 +54,6 @@ needed for final integration checks:
 ./build/au-midi-probe
 ```
 
-Logic is only needed for final integration checks.
-
 ## Layout
 
 - `src/chord_engine.{h,cpp}` — the four chord scales, scale identification and stacked
