@@ -21,11 +21,13 @@ enum class ScaleFamily : int
   Count
 };
 
-// How a trigger chord is stacked. The first version offers close position only, with
-// the pressed note as the top note of the chord.
+// How a trigger chord is stacked. `Close` is close position with the pressed note
+// as the top note of the chord; `Drop2` does the same but moves the second note
+// from the top down an octave.
 enum class VoicingType : int
 {
   Close = 0,
+  Drop2 = 1,
   Count
 };
 
@@ -68,16 +70,16 @@ struct ScaleSelection
 // *out is left as it was, so the caller keeps the last valid selection.
 bool selectScale(uint16_t pitchClassMask, ScaleSelection *out);
 
-// The close-position stacked chord of the selected scale with `topKey` as its top
-// note. Returns a chord of count 0 if the note is not in the scale; voices that
-// fall outside 0..127 are dropped rather than wrapped.
+// The stacked chord of the selected scale in the requested voicing, with `topKey`
+// as its top note. Returns a chord of count 0 if the note is not in the scale;
+// voices that fall outside 0..127 are dropped rather than wrapped.
 Chord buildStackedChord(const ScaleSelection &sel, int topKey, VoicingType voicing);
 
 // "major 6th dim", for the interface.
 const char *scaleFamilyName(ScaleFamily family);
 // "6dim", "m6dim", "7dim", "7♭5dim", for a button.
 const char *scaleFamilyShortName(ScaleFamily family);
-// "Close", for a voicing button.
+// "Close", "Drop2", for a voicing button.
 const char *voicingTypeName(VoicingType voicing);
 
 }  // namespace bhl

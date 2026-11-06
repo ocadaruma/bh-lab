@@ -12,13 +12,14 @@ An Audio Unit note effect based on **Barry Harris's stacked diminished scales**
 - Keys in the **trigger zone** sound the close-position stack of the selected scale
   with the pressed note on top (e.g. C major 6th, E4 pressed → G3 A3 C4 E4). A
   trigger key outside the selected scale is passed through untouched.
-- The **voicing type** is a parameter; the first version supports close position only.
+- The **voicing type** is a parameter: close position, or the same stack with the
+  second note from the top dropped an octave (drop2).
 
 Parameters (automatable):
 
 | id | name | range | default |
 |----|------|-------|---------|
-| 0 | Voicing | Close | Close |
+| 0 | Voicing | Close, Drop2 | Close |
 | 1 | Control Zone Root | C-2 .. G5 | C2 |
 | 2 | Trigger Zone Start | C-1 .. G9 | C3 |
 

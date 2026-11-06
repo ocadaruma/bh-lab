@@ -31,7 +31,7 @@ constexpr int kDimIntervals[kStackedChordNotes] = {0, 3, 6, 9};
 static_assert(sizeof(kFamilies) / sizeof(kFamilies[0]) == static_cast<size_t>(ScaleFamily::Count),
               "family table out of sync with the enum");
 
-constexpr const char *kVoicingNames[static_cast<int>(VoicingType::Count)] = {"Close"};
+constexpr const char *kVoicingNames[static_cast<int>(VoicingType::Count)] = {"Close", "Drop2"};
 
 static_assert(sizeof(kVoicingNames) / sizeof(kVoicingNames[0]) ==
                   static_cast<size_t>(VoicingType::Count),
@@ -171,8 +171,6 @@ Chord buildStackedChord(const ScaleSelection &sel, int topKey, VoicingType voici
   if (!inRange(static_cast<int>(sel.family), static_cast<int>(ScaleFamily::Count)))
     return chord;
   if (topKey < 0 || topKey > 127) return chord;
-  if (voicing != VoicingType::Close) return chord;  // Not implemented yet.
-
   const int pc = topKey % 12;
 
   // Which stacked chord the pressed note belongs to: named or diminished. The two
@@ -199,9 +197,35 @@ Chord buildStackedChord(const ScaleSelection &sel, int topKey, VoicingType voici
     voices[count++] = voice;
   }
 
-  std::sort(voices, voices + count);
-  for (int i = 0; i < count; ++i) chord.notes[i] = voices[i];
-  chord.count = count;
+  // Drop2 moves the second voice from the top down an octave. When the stack sits
+  // low, the moved voice falls below key 0 and is dropped rather than wrapped.
+  int dropped = -1;
+  if (voicing == VoicingType::Drop2 && count >= 2)
+  {
+    int topIdx = 0, secondIdx = 1;
+    if (voices[secondIdx] > voices[topIdx]) std::swap(topIdx, secondIdx);
+    for (int i = 2; i < count; ++i)
+    {
+      if (voices[i] > voices[topIdx])
+      {
+        secondIdx = topIdx;
+        topIdx = i;
+      }
+      else if (voices[i] > voices[secondIdx]) secondIdx = i;
+    }
+    if (voices[secondIdx] - 12 < 0)
+      dropped = secondIdx;
+    else
+      voices[secondIdx] -= 12;
+  }
+
+  int out = 0;
+  for (int i = 0; i < count; ++i)
+    if (i != dropped) voices[out++] = voices[i];
+
+  std::sort(voices, voices + out);
+  for (int i = 0; i < out; ++i) chord.notes[i] = voices[i];
+  chord.count = out;
   return chord;
 }
 

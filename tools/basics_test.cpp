@@ -171,6 +171,34 @@ int main()
            first.size() == 1 && !first[0].on && first[0].key == 60, describe(first));
   }
 
+  // Drop2 voicing: the second note from the top moves down an octave. C4 on top of
+  // C major 6th is E3 G3 A3 C4, so drop2 sounds A2 E3 G3 C4.
+  reset(plugin, &timeline);
+  {
+    InputEvents setup;
+    setup.addParam(kVoicing, 1);  // Drop2
+    timeline.run(&setup);
+  }
+  holdControl(&timeline, {48});
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 60, 0.8);
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool drop2 = first.size() == 4 && first[0].key == 45 && first[1].key == 52 &&
+                       first[2].key == 55 && first[3].key == 60;
+    expect("drop2 moves the second note from the top down an octave", drop2, describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 60, 0.0);
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 48, 0.0);
+    timeline.run(&release);
+  }
+
   // --- scale selection from the control octave ---------------------------------
   // C E G A identifies C major 6th (it is the default already, but the press must not
   // disturb it).

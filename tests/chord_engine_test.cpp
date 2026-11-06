@@ -152,6 +152,21 @@ int main()
   expectChord("C4 on top of Am6", buildStackedChord(am6, 60, VoicingType::Close),
               (const int[]){52, 54, 57, 60}, 4);
 
+  // Drop2: the same stacks, but the second note from the top moves down an octave.
+  // C4 on top of C6: E3 G3 A3 C4 -> A2 E3 G3 C4.
+  expectChord("C4 drop2 on top of C6", buildStackedChord(c6, 60, VoicingType::Drop2),
+              (const int[]){45, 52, 55, 60}, 4);
+  // E4 on top of C6: G3 A3 C4 E4 -> C3 G3 A3 E4.
+  expectChord("E4 drop2 on top of C6", buildStackedChord(c6, 64, VoicingType::Drop2),
+              (const int[]){48, 55, 57, 64}, 4);
+  // D3 on top of C6 (the dim chord): F2 Ab2 B2 D3 -> B1 F2 Ab2 D3.
+  expectChord("D3 drop2 on top of C6", buildStackedChord(c6, 50, VoicingType::Drop2),
+              (const int[]){35, 41, 44, 50}, 4);
+  // When the moved note falls below key 0 it is dropped, not wrapped: C2 on top of
+  // C6 is E1 G1 A1 C2, and dropping A1 leaves E1 G1 C2.
+  expectChord("drop2 below range loses a voice", buildStackedChord(c6, 12, VoicingType::Drop2),
+              (const int[]){4, 7, 12}, 3);
+
   // A note outside the scale produces nothing.
   expectTrue("Bb is not in C6", buildStackedChord(c6, 70, VoicingType::Close).count == 0);
   expectTrue("root out of range", buildStackedChord(c6, -1, VoicingType::Close).count == 0);
