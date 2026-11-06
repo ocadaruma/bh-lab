@@ -17,6 +17,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <strings.h>  // strcasecmp
+#if defined(__APPLE__)
+#include <os/log.h>
+#endif
 
 #include "bhl_entry.h"
 #include "bhl_gui.h"
@@ -27,9 +30,12 @@ using namespace bhl;
 namespace
 {
 
-// Debugging: every note event in and out is logged to stderr (Console.app under a
-// host), so a note a host reports as "out of the blue" can be traced to the event
-// that caused it.
+// Debugging: every note event in and out is logged to stderr and to the
+// unified log (os_log). Hosts like Logic redirect their stderr after startup
+// and run AUv2 plugins out-of-process, so os_log is the channel guaranteed
+// to survive; a note a host reports as "out of the blue" can be traced to the
+// event that caused it (Console.app: search "[bhl]", process
+// AUHostingServiceXPC_arrow).
 void bhlLog(const char *fmt, ...)
 {
   char buf[512];
@@ -41,6 +47,9 @@ void bhlLog(const char *fmt, ...)
   {
     fprintf(stderr, "[bhl] %s\n", buf);
     fflush(stderr);
+#if defined(__APPLE__)
+    os_log(OS_LOG_DEFAULT, "[bhl] %{public}s", buf);
+#endif
   }
 }
 
@@ -663,10 +672,23 @@ void handleEvent(Bhl *rc, const clap_event_header_t *hdr, const clap_output_even
     // Controllers, pitch bend, aftertouch and friends arrive as raw MIDI regardless of
     // the note dialect; they are channel-wide, so forward them untouched.
     case CLAP_EVENT_MIDI:
-    case CLAP_EVENT_MIDI_SYSEX:
     case CLAP_EVENT_MIDI2:
       passThrough(out, hdr);
       break;
+
+    case CLAP_EVENT_MIDI_SYSEX:
+    {
+      // Never echo SysEx. bh-lab has no SysEx functionality, and Logic sends its
+      // own host messages down the input -- including the host tuning table
+      // ("Logic Tuning Data", F0 7E 7F 08 ...) at every plugin load; echoing it
+      // back makes Logic re-apply it and shift note pitch (the 0.16.0 pitch
+      // bug). Dropping it unconditionally avoids depending on the exact header,
+      // which Logic is free to change.
+      const auto *sx = reinterpret_cast<const clap_event_midi_sysex_t *>(hdr);
+      bhlLog("sysex dropped size=%u first=0x%02X", sx->size,
+             sx->buffer ? sx->buffer[0] : 0);
+      break;
+    }
 
     default:
       break;

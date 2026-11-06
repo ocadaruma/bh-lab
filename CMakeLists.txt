@@ -101,4 +101,10 @@ if(APPLE)
     # enable-time renders), the only place host-facing behaviour can be seen.
     add_executable(au-midi-probe tools/au_midi_probe.cpp)
     target_link_libraries(au-midi-probe PRIVATE "-framework AudioToolbox" "-framework CoreFoundation")
+
+    # Drives the installed AU the way Logic does (protocol properties, UMP output
+    # event-list block) and feeds input via legacy MIDI1, UMP lists and the
+    # extended-note API, dumping every emitted MIDI event as UMP words.
+    add_executable(au-logic-probe tools/au_logic_probe.cpp)
+    target_link_libraries(au-logic-probe PRIVATE "-framework AudioToolbox" "-framework CoreFoundation" "-framework CoreMIDI")
 endif()
