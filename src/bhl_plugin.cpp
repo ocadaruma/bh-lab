@@ -124,8 +124,7 @@ ScaleSelection decodeSelection(int encoded)
 // Voice tracking
 // ---------------------------------------------------------------------------
 
-// One entry per held trigger key. Chords must be released with exactly the note ids
-// they were started with, or the instrument downstream is left with stuck notes.
+// One entry per held trigger key.
 struct HeldChord
 {
   bool active = false;
@@ -142,6 +141,20 @@ struct HeldChord
 };
 
 constexpr int kMaxHeldChords = 32;
+
+// One physical voice per (channel, key). Stacked chords can contain the same note --
+// the C4 stack and the E4 stack of one scale both hold the C and E below the top note
+// -- and a MIDI key can be silenced only once. Sharing a single note id per key, with
+// a reference count per chord, keeps a note ringing until the last chord that owns it
+// is released.
+struct VoicePoolEntry
+{
+  bool active = false;
+  int32_t noteId = -1;
+  int16_t channel = 0;
+  int16_t key = 0;
+  int refs = 0;
+};
 
 struct Bhl
 {
@@ -165,6 +178,9 @@ struct Bhl
   HeldChord held[kMaxHeldChords];
   int32_t nextNoteId = 0;
   int heldCount = 0;
+
+  VoicePoolEntry voicePool[kMaxHeldChords * kStackedChordNotes];
+  int voiceCount = 0;
 
   double sampleRate = 48000.0;
   // Note-offs the host would not accept. Dropping one leaves a note ringing downstream
@@ -395,6 +411,67 @@ HeldChord *allocHeld(Bhl *rc)
   return nullptr;
 }
 
+VoicePoolEntry *findPooledVoice(Bhl *rc, int16_t channel, int16_t key)
+{
+  for (auto &v : rc->voicePool)
+    if (v.active && v.channel == channel && v.key == key) return &v;
+  return nullptr;
+}
+
+// Claims the shared voice for (channel, key). A note-on is pushed only when the voice
+// is newly created; an already-sounding note is reused untouched, so the downstream
+// instrument is not re-triggered on a key it already holds.
+int32_t acquireVoice(Bhl *rc, const clap_output_events_t *out, uint32_t time, int16_t channel,
+                     int16_t key, double velocity)
+{
+  VoicePoolEntry *v = findPooledVoice(rc, channel, key);
+  if (!v)
+  {
+    VoicePoolEntry *freeSlot = nullptr;
+    for (auto &e : rc->voicePool)
+      if (!e.active) { freeSlot = &e; break; }
+    if (!freeSlot) return -1;  // Out of slots: better to drop the note than to leak it.
+
+    v = freeSlot;
+    v->active = true;
+    v->channel = channel;
+    v->key = key;
+    v->refs = 1;  // This chord owns the new voice.
+    v->noteId = -1;
+    ++rc->voiceCount;
+
+    const int32_t noteId = rc->nextNoteId++;
+    if (rc->nextNoteId < 0) rc->nextNoteId = 0;
+    if (!pushNote(out, CLAP_EVENT_NOTE_ON, time, noteId, channel, key, velocity))
+      return -1;  // Never sounded, so it is not ours to release.
+
+    v->noteId = noteId;
+    rc->gui.noteOn(key);
+    return noteId;
+  }
+
+  ++v->refs;
+  return v->noteId;
+}
+
+// Drops one chord's claim on (channel, key); the note-off goes out only when the last
+// claim is gone. A note that never sounded is dropped silently.
+void releaseVoice(Bhl *rc, const clap_output_events_t *out, uint32_t time, int16_t channel,
+                  int16_t key, double velocity, uint16_t type)
+{
+  VoicePoolEntry *v = findPooledVoice(rc, channel, key);
+  if (!v) return;
+  if (v->refs > 0) --v->refs;
+  if (v->refs > 0) return;
+
+  rc->gui.noteOff(key);
+  if (v->noteId >= 0) emitNoteOff(rc, out, type, time, v->noteId, channel, key, velocity);
+  v->active = false;
+  v->refs = 0;
+  v->noteId = -1;
+  if (rc->voiceCount > 0) --rc->voiceCount;
+}
+
 // Emits note-offs for every voice of a held chord and frees the slot.
 void releaseHeld(Bhl *rc, HeldChord *held, const clap_output_events_t *out, uint32_t time,
                  double velocity, uint16_t type = CLAP_EVENT_NOTE_OFF)
@@ -402,10 +479,7 @@ void releaseHeld(Bhl *rc, HeldChord *held, const clap_output_events_t *out, uint
   for (int i = 0; i < held->count; ++i)
   {
     rc->gui.chordOff(held->voices[i].key);
-    if (held->voices[i].noteId < 0) continue;
-    emitNoteOff(rc, out, type, time, held->voices[i].noteId, held->channel,
-                held->voices[i].key, velocity);
-    rc->gui.noteOff(held->voices[i].key);
+    releaseVoice(rc, out, time, held->channel, held->voices[i].key, velocity, type);
   }
   if (held->active) --rc->heldCount;
   held->active = false;
@@ -546,19 +620,13 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
 
   for (int i = 0; i < chord.count; ++i)
   {
-    const int32_t noteId = rc->nextNoteId++;
-    if (rc->nextNoteId < 0) rc->nextNoteId = 0;
-
     held->voices[i].key = static_cast<int16_t>(chord.notes[i]);
     held->voices[i].noteId = -1;
     rc->gui.chordOn(chord.notes[i]);
 
-    if (!pushNote(out, CLAP_EVENT_NOTE_ON, note->header.time, noteId, channel,
-                  static_cast<int16_t>(chord.notes[i]), note->velocity))
-      continue;  // Never sounded, so it is not ours to release.
-
-    held->voices[i].noteId = noteId;
-    rc->gui.noteOn(chord.notes[i]);
+    held->voices[i].noteId =
+        acquireVoice(rc, out, note->header.time, channel, static_cast<int16_t>(chord.notes[i]),
+                     note->velocity);
   }
 
   rc->gui.rootKey.store(note->key, std::memory_order_relaxed);
@@ -1114,6 +1182,13 @@ void CLAP_ABI pluginReset(const clap_plugin_t *plugin)
     h.count = 0;
   }
   rc->heldCount = 0;
+  for (auto &v : rc->voicePool)
+  {
+    v.active = false;
+    v.refs = 0;
+    v.noteId = -1;
+  }
+  rc->voiceCount = 0;
   for (auto &pending : rc->pendingOffs) pending.active = false;
   std::memset(rc->forwarded, 0, sizeof(rc->forwarded));
   std::memset(rc->controlHeld, 0, sizeof(rc->controlHeld));

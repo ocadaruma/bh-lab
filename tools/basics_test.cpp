@@ -318,22 +318,34 @@ int main()
   timeline.runFor(200);
   expect("holding the key sounds nothing more", g_emitted.empty(), describe(g_emitted));
 
-  // A second chord while the first is held: both sound, both release.
+  // A second chord while the first is held: shared keys are not re-triggered, only the
+  // genuinely new note sounds.
   {
     InputEvents second;
     second.addNote(CLAP_EVENT_NOTE_ON, 0, 64, 0.8);
     timeline.run(&second);
   }
   {
-    bool allOn = g_emitted.size() == 4;
-    for (const auto &e : g_emitted) allOn = allOn && e.on;
-    expect("a second key adds its own chord", allOn, describe(g_emitted));
+    const bool shared = g_emitted.size() == 1 && g_emitted[0].on && g_emitted[0].key == 64;
+    expect("a second key adds only its new note", shared, describe(g_emitted));
+  }
+
+  // Releasing one of two overlapping chords: the shared keys keep sounding, owned by
+  // the chord that is still held. C3's stack is E3 G3 A3 C3; E3's is G3 A3 C3 E3.
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 60, 0.0);
+    timeline.run(&release);
+  }
+  {
+    const bool sharedHeld = g_emitted.size() == 1 && !g_emitted[0].on && g_emitted[0].key == 52;
+    expect("releasing C3 keeps the shared keys ringing", sharedHeld, describe(g_emitted));
   }
 
   g_emitted.clear();
   {
     InputEvents release;
-    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 60, 0.0);
     release.addNote(CLAP_EVENT_NOTE_OFF, 0, 64, 0.0);
     release.addNote(CLAP_EVENT_NOTE_OFF, 0, 48, 0.0);
     timeline.run(&release);
@@ -342,8 +354,9 @@ int main()
     int offs = 0;
     for (const auto &e : g_emitted)
       if (!e.on) ++offs;
-    expect("both chords release", offs == 8, describe(g_emitted));
+    expect("the last chord release stops the shared keys too", offs == 4, describe(g_emitted));
   }
+  g_emitted.clear();
 
   // Re-triggering a held key restarts its chord without leaking notes.
   reset(plugin, &timeline);
