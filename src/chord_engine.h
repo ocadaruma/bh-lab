@@ -63,7 +63,7 @@ struct ScaleSelection
 //
 // Matching is tiered: a named chord rooted at the lowest pressed class, then the
 // dim chord rooted there, then a named chord at any key, then the dim chord at any
-// key -- families in preference order (major 6th > minor 6th > 7th > 7th b5)
+// key -- families in preference order (major 6th > minor 6th > 7th > 7th ♭5)
 // within each tier. Returns false when the mask matches no scale; in that case
 // *out is left as it was, so the caller keeps the last valid selection.
 bool selectScale(uint16_t pitchClassMask, ScaleSelection *out);
@@ -75,7 +75,7 @@ Chord buildStackedChord(const ScaleSelection &sel, int topKey, VoicingType voici
 
 // "major 6th dim", for the interface.
 const char *scaleFamilyName(ScaleFamily family);
-// "6°", "m6°", "7°", "7b5°", for a button.
+// "6dim", "m6dim", "7dim", "7♭5dim", for a button.
 const char *scaleFamilyShortName(ScaleFamily family);
 // "Close", for a voicing button.
 const char *voicingTypeName(VoicingType voicing);

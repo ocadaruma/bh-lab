@@ -59,11 +59,11 @@ int main()
   expectTrue("minor 6th scale",
              scalePitchClasses(ScaleFamily::Minor6) == mask({0, 2, 3, 5, 7, 8, 9, 11}));
   expectTrue("7th scale", scalePitchClasses(ScaleFamily::Seven) == mask({0, 2, 4, 5, 7, 8, 10, 11}));
-  expectTrue("7b5 scale", scalePitchClasses(ScaleFamily::SevenB5) == mask({0, 2, 4, 5, 6, 8, 10, 11}));
+  expectTrue("7♭5 scale", scalePitchClasses(ScaleFamily::SevenB5) == mask({0, 2, 4, 5, 6, 8, 10, 11}));
   expectTrue("major 6th named chord", namedChordPitchClasses(ScaleFamily::Major6) == mask({0, 4, 7, 9}));
   expectTrue("minor 6th named chord", namedChordPitchClasses(ScaleFamily::Minor6) == mask({0, 3, 7, 9}));
   expectTrue("7th named chord", namedChordPitchClasses(ScaleFamily::Seven) == mask({0, 4, 7, 10}));
-  expectTrue("7b5 named chord", namedChordPitchClasses(ScaleFamily::SevenB5) == mask({0, 4, 6, 10}));
+  expectTrue("7♭5 named chord", namedChordPitchClasses(ScaleFamily::SevenB5) == mask({0, 4, 6, 10}));
   expectTrue("dim chord", dimChordPitchClasses(2) == mask({2, 5, 8, 11}));
   expectTrue("dim chord wraps", dimChordPitchClasses(11) == mask({11, 2, 5, 8}));
 
@@ -96,7 +96,7 @@ int main()
   }
   {
     ScaleSelection sel;
-    expectTrue("CEGbBb -> C 7b5", selectScale(mask({0, 4, 6, 10}), &sel));
+    expectTrue("CEGbBb -> C 7♭5", selectScale(mask({0, 4, 6, 10}), &sel));
     expectSelection("CEGbBb selection", sel, ScaleFamily::SevenB5, 0);
   }
 

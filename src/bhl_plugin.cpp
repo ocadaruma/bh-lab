@@ -1,7 +1,7 @@
 // bh-lab: an AU note effect based on Barry Harris's stacked diminished scales.
 //
 // Notes held in the control octave identify the scale -- the family (major 6th, minor
-// 6th, 7th or 7th b5 diminished) and its key -- and the identification follows the
+// 6th, 7th or 7th ♭5 diminished) and its key -- and the identification follows the
 // held notes live. Keys in the trigger zone each sound the close-position stack of
 // the selected scale with the pressed note on top; a trigger key outside the scale
 // passes through untouched.

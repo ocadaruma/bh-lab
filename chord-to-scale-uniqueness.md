@@ -17,24 +17,24 @@ produces this exact stacked chord.
 Barry's four chord-scales (verified against barryharrismethod.com).
 
 All four C-root scales contain the **same** diminished chord,
-**B° = {B, D, F♭, A♭}**.
+**Bdim = {B, D, F♭, A♭}**.
 
 They differ only in the 4-note chord they stack with:
 
 | family | C-root scale (8 notes) | 4-note chord |
 |---|---|---|
-| Major 6th dim (6°) | C D E F G A♭ A B | C6 = {C E G A} |
-| Minor 6th dim (m6°) | C D E♭ F G A♭ A B | Cm6 = {C E♭ G A} |
-| 7th dim (7°) | C D E F G A♭ B♭ B | C7 = {C E G B♭} |
-| 7th b5 dim (7♭5°) | C D E F G♭ A♭ B♭ B | C7♭5 = {C E G♭ B♭} |
+| Major 6th dim (6dim) | C D E F G A♭ A B | C6 = {C E G A} |
+| Minor 6th dim (m6dim) | C D E♭ F G A♭ A B | Cm6 = {C E♭ G A} |
+| 7th dim (7dim) | C D E F G A♭ B♭ B | C7 = {C E G B♭} |
+| 7th ♭5 dim (7♭5dim) | C D E F G♭ A♭ B♭ B | C7♭5 = {C E G♭ B♭} |
 
 Played as a "scale of chords", each scale yields skip-one stacked 4-note chords,
 alternating the named chord and the shared diminished (each in 4 inversions).
 
-Example, 6° in C:
+Example, 6dim in C:
 
 ```
-C6    D°    E6    F°    G6    A♭°   A6    B°
+C6    Ddim  E6    Fdim  G6    A♭dim  A6    Bdim
 C E G A   D F A♭ B   E G A C   F A♭ C E♭   G B♭ D F   …
 ```
 
@@ -53,14 +53,14 @@ scale).
 | Major 6th dim | **C only** |
 | Minor 6th dim | — |
 | 7th dim | — |
-| 7th b5 dim | — |
+| 7th ♭5 dim | — |
 
 **Why (structurally):**
 
 - {C E G A} has interval skeleton **m3–M2–m3**.
 - Only the 6th family's stacked 4-chord has that skeleton
   (Cm6 / C7 / C7♭5 are built from m3–m3–M2).
-- Within 6°, the stacked 6-chords are always {X, X+4, X+7, X+9} for key X.
+- Within 6dim, the stacked 6-chords are always {X, X+4, X+7, X+9} for key X.
   That set equals {C E G A} **only for X = C**.
 
 ---
@@ -70,7 +70,7 @@ scale).
 - E G A C identifies its scale unambiguously:
   the **C major 6th diminished scale**.
 - It is the C6, appearing at bass notes C, E, G, A as inversions,
-  alternating with D°, F°, A♭°, B°.
+  alternating with Ddim, Fdim, A♭dim, Bdim.
 - Chord→scale identification must be made in the **stacked-chord** sense
   (Barry's sense: "once you know which scale a chord belongs to, you know
   where you can move it").

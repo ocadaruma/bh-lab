@@ -18,12 +18,12 @@ struct FamilyDef
 
 // The four C-root chord scales, from the Barry Harris method (see design.md). `named`
 // is the 4-note chord that belongs to the family; all four families share the
-// diminished chord {0, 3, 6, 9} (a D° in the C-root keys).
+// diminished chord {0, 3, 6, 9} (a Ddim in the C-root keys).
 constexpr FamilyDef kFamilies[static_cast<int>(ScaleFamily::Count)] = {
-    {"major 6th dim", "6°",   {0, 2, 4, 5, 7, 8, 9, 11}, {0, 4, 7, 9}},
-    {"minor 6th dim", "m6°",  {0, 2, 3, 5, 7, 8, 9, 11}, {0, 3, 7, 9}},
-    {"7th dim",       "7°",   {0, 2, 4, 5, 7, 8, 10, 11}, {0, 4, 7, 10}},
-    {"7th b5 dim",    "7b5°", {0, 2, 4, 5, 6, 8, 10, 11}, {0, 4, 6, 10}},
+    {"major 6th dim", "6dim",   {0, 2, 4, 5, 7, 8, 9, 11}, {0, 4, 7, 9}},
+    {"minor 6th dim", "m6dim",  {0, 2, 3, 5, 7, 8, 9, 11}, {0, 3, 7, 9}},
+    {"7th dim",       "7dim",   {0, 2, 4, 5, 7, 8, 10, 11}, {0, 4, 7, 10}},
+    {"7th ♭5 dim",    "7♭5dim", {0, 2, 4, 5, 6, 8, 10, 11}, {0, 4, 6, 10}},
 };
 
 constexpr int kDimIntervals[kStackedChordNotes] = {0, 3, 6, 9};

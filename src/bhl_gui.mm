@@ -510,7 +510,7 @@ Snapshot takeSnapshot(GuiState *state)
   const CGFloat ly = kControlKeyboardY + 2;
   drawText(@"Held control notes identify the scale", NSMakeRect(lx, ly, lw, 14), 11,
            gray(0.58), NSTextAlignmentLeft);
-  drawText(@"(6° > m6° > 7° > 7b5°); trigger keys sound", NSMakeRect(lx, ly + 15, lw, 14), 11,
+  drawText(@"(6dim > m6dim > 7dim > 7♭5dim); trigger keys sound", NSMakeRect(lx, ly + 15, lw, 14), 11,
            gray(0.58), NSTextAlignmentLeft);
   drawText(@"the stack with the pressed note on top;", NSMakeRect(lx, ly + 30, lw, 14), 11,
            gray(0.58), NSTextAlignmentLeft);
