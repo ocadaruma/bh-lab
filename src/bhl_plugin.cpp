@@ -12,7 +12,6 @@
 
 #include <atomic>
 #include <cstdarg>
-#include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

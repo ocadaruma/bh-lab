@@ -54,29 +54,6 @@ needed for final integration checks:
 ./build/au-midi-probe
 ```
 
-## Layout
+## Credits
 
-- `src/chord_engine.{h,cpp}` — the four chord scales, scale identification and stacked
-  chord building, free of any plugin API.
-- `src/bhl_plugin.cpp` — the CLAP plugin (parameters, event routing, state, ports).
-- `src/bhl_gui.{h,mm}` — the Cocoa view: the selected scale, the generated-chord
-  keyboard and the control octave.
-- `src/bhl_entry.{h,cpp}` — the CLAP entry point.
-- `deps/` — git submodules: CLAP SDK, AudioUnit SDK and clap-wrapper (pinned in
-  `.gitmodules`; clone with `--recursive`).
-- `tools/` — a synthetic CLAP host (`basics-test`) and a view renderer (`gui-preview`).
-
-## Design notes
-
-- All plugin logic lives in the `bh-lab-impl` static library; the AU format is just its
-  entry-point translation unit plus the wrapper.
-- Parameter ids are frozen: automation written against an id replays into whatever that
-  id means later, so parameters are only ever appended, never inserted.
-- Chords are released by the note ids they were started with; note-offs the host's queue
-  refuses are held and retried on the next block, so a release is never dropped.
-- The window is fixed size; the view redraws on a timer only when the audio thread's
-  snapshot changes.
-- While nothing is held in the control octave the plugin is in pass-through mode and the
-  view goes with it: no scale readout, no scale tinting or root in the control octave.
-- Note events in and out are logged to stderr (Console.app under a host) so a note a
-  host reports can be traced to the event that caused it.
+The plugin structure, UI and tools are based on [zzfutang/r-chord](https://github.com/zzfutang/r-chord).

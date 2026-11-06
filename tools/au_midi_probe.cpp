@@ -10,11 +10,9 @@
 
 #include <AudioToolbox/AudioToolbox.h>
 #include <CoreFoundation/CoreFoundation.h>
-#include <CoreMIDI/CoreMIDI.h>
 
 #include <cstdio>
 #include <cstring>
-#include <string>
 #include <vector>
 
 namespace
