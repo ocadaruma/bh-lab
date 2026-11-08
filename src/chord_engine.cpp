@@ -31,7 +31,8 @@ constexpr int kDimIntervals[kStackedChordNotes] = {0, 3, 6, 9};
 static_assert(sizeof(kFamilies) / sizeof(kFamilies[0]) == static_cast<size_t>(ScaleFamily::Count),
               "family table out of sync with the enum");
 
-constexpr const char *kVoicingNames[static_cast<int>(VoicingType::Count)] = {"Close", "Drop2"};
+constexpr const char *kVoicingNames[static_cast<int>(VoicingType::Count)] = {
+    "Close", "Drop2", "Drop3", "Drop2&4"};
 
 static_assert(sizeof(kVoicingNames) / sizeof(kVoicingNames[0]) ==
                   static_cast<size_t>(VoicingType::Count),
@@ -197,35 +198,52 @@ Chord buildStackedChord(const ScaleSelection &sel, int topKey, VoicingType voici
     voices[count++] = voice;
   }
 
-  // Drop2 moves the second voice from the top down an octave. When the stack sits
-  // low, the moved voice falls below key 0 and is dropped rather than wrapped.
-  int dropped = -1;
-  if (voicing == VoicingType::Drop2 && count >= 2)
+  // Drop voicings move specific voices, counted from the top, down an octave. When
+  // the stack sits low, a moved voice falls below key 0 and is dropped rather than
+  // wrapped.
+  if (voicing != VoicingType::Close && count >= 2)
   {
-    int topIdx = 0, secondIdx = 1;
-    if (voices[secondIdx] > voices[topIdx]) std::swap(topIdx, secondIdx);
-    for (int i = 2; i < count; ++i)
+    // Voice indices ordered by pitch, highest first.
+    int order[kStackedChordNotes] = {};
+    for (int i = 0; i < count; ++i) order[i] = i;
+    std::sort(order, order + count,
+              [&](int a, int b) { return voices[a] > voices[b]; });
+
+    int dropPos[kStackedChordNotes] = {0, 1, 2, 3};
+    int dropCount = 0;
+    switch (voicing)
     {
-      if (voices[i] > voices[topIdx])
-      {
-        secondIdx = topIdx;
-        topIdx = i;
-      }
-      else if (voices[i] > voices[secondIdx]) secondIdx = i;
+      case VoicingType::Drop2:
+        dropPos[0] = 1;
+        dropCount = 1;
+        break;  // 2nd from the top
+      case VoicingType::Drop3: dropPos[0] = 2; dropCount = 1; break;  // 3rd from the top
+      case VoicingType::Drop2_4:
+        dropPos[0] = 1;
+        dropPos[1] = 3;
+        dropCount = 2;
+        break;                                                  // 2nd and 4th
+      default: break;
     }
-    if (voices[secondIdx] - 12 < 0)
-      dropped = secondIdx;
-    else
-      voices[secondIdx] -= 12;
+
+    bool removed[kStackedChordNotes] = {};
+    for (int i = 0; i < dropCount; ++i)
+    {
+      const int idx = order[dropPos[i]];
+      if (voices[idx] - 12 < 0)
+        removed[idx] = true;
+      else
+        voices[idx] -= 12;
+    }
+    int kept = 0;
+    for (int i = 0; i < count; ++i)
+      if (!removed[i]) voices[kept++] = voices[i];
+    count = kept;
   }
 
-  int out = 0;
-  for (int i = 0; i < count; ++i)
-    if (i != dropped) voices[out++] = voices[i];
-
-  std::sort(voices, voices + out);
-  for (int i = 0; i < out; ++i) chord.notes[i] = voices[i];
-  chord.count = out;
+  std::sort(voices, voices + count);
+  for (int i = 0; i < count; ++i) chord.notes[i] = voices[i];
+  chord.count = count;
   return chord;
 }
 

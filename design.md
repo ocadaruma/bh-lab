@@ -61,5 +61,9 @@ Based on Barry Harris's diminished scale, the plugin triggers a chord
 
 ## voicing type
 - This is a selectable for how the chord is stacked
-- But for first version, we will only support close position voicing, with the pressed note as the top note of the chord
-  * i.e. If the scale is C major 6th diminished scale, and the pressed note is E4, the chord will be G3 A3 C4 E4
+- The options are close position and drop voicings, all with the pressed note as the top note of the chord
+  * close: the close-position stack
+    * i.e. If the scale is C major 6th diminished scale, and the pressed note is E4, the chord will be G3 A3 C4 E4
+  * drop2: the same stack with the second note from the top moved down an octave (G2 A3 C4 E4)
+  * drop3: the third note from the top moved down an octave (G3 A2 C4 E4)
+  * drop2&4: the second and fourth notes from the top moved down an octave (G2 C3 A3 E4)

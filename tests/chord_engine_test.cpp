@@ -167,6 +167,34 @@ int main()
   expectChord("drop2 below range loses a voice", buildStackedChord(c6, 12, VoicingType::Drop2),
               (const int[]){4, 7, 12}, 3);
 
+  // Drop3: the third note from the top moves down an octave.
+  // C4 on top of C6: E3 G3 A3 C4 -> E3 G2 A3 C4.
+  expectChord("C4 drop3 on top of C6", buildStackedChord(c6, 60, VoicingType::Drop3),
+              (const int[]){43, 52, 57, 60}, 4);
+  // E4 on top of C6: G3 A3 C4 E4 -> A2 G3 C4 E4.
+  expectChord("E4 drop3 on top of C6", buildStackedChord(c6, 64, VoicingType::Drop3),
+              (const int[]){45, 55, 60, 64}, 4);
+  // D3 on top of C6 (the dim chord): F2 Ab2 B2 D3 -> Ab1 F2 B2 D3.
+  expectChord("D3 drop3 on top of C6", buildStackedChord(c6, 50, VoicingType::Drop3),
+              (const int[]){32, 41, 47, 50}, 4);
+  // G1 on top of C2 falls below key 0 and is dropped: E1 G1 A1 C2 -> E1 A1 C2.
+  expectChord("drop3 below range loses a voice", buildStackedChord(c6, 12, VoicingType::Drop3),
+              (const int[]){4, 9, 12}, 3);
+
+  // Drop2&4: the second and fourth notes from the top move down an octave.
+  // C4 on top of C6: E3 G3 A3 C4 -> E2 A2 G3 C4.
+  expectChord("C4 drop2&4 on top of C6", buildStackedChord(c6, 60, VoicingType::Drop2_4),
+              (const int[]){40, 45, 55, 60}, 4);
+  // E4 on top of C6: G3 A3 C4 E4 -> G2 C3 A3 E4.
+  expectChord("E4 drop2&4 on top of C6", buildStackedChord(c6, 64, VoicingType::Drop2_4),
+              (const int[]){43, 48, 57, 64}, 4);
+  // D3 on top of C6 (the dim chord): F2 Ab2 B2 D3 -> F1 B1 Ab2 D3.
+  expectChord("D3 drop2&4 on top of C6", buildStackedChord(c6, 50, VoicingType::Drop2_4),
+              (const int[]){29, 35, 44, 50}, 4);
+  // A1 and E1 on top of C2 fall below key 0 and are dropped: G1 C2 remains.
+  expectChord("drop2&4 below range loses two voices", buildStackedChord(c6, 12, VoicingType::Drop2_4),
+              (const int[]){7, 12}, 2);
+
   // A note outside the scale produces nothing.
   expectTrue("Bb is not in C6", buildStackedChord(c6, 70, VoicingType::Close).count == 0);
   expectTrue("root out of range", buildStackedChord(c6, -1, VoicingType::Close).count == 0);

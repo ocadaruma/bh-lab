@@ -9,17 +9,18 @@ An Audio Unit note effect based on **Barry Harris's stacked diminished scales**
   released; when the held notes are ambiguous the families are preferred in the order
   6dim > m6dim > 7dim > 7♭5dim. While nothing is held in the control octave the plugin is in
   pass-through mode: trigger keys pass through untouched.
-- Keys in the **trigger zone** sound the close-position stack of the selected scale
-  with the pressed note on top (e.g. C major 6th, E4 pressed → G3 A3 C4 E4). A
-  trigger key outside the selected scale is passed through untouched.
+- Keys in the **trigger zone** sound the stack of the selected scale with the pressed
+  note on top (e.g. C major 6th, E4 pressed → G3 A3 C4 E4). A trigger key outside the
+  selected scale is passed through untouched.
 - The **voicing type** is a parameter: close position, or the same stack with the
-  second note from the top dropped an octave (drop2).
+  second note from the top dropped an octave (drop2), the third (drop3), or the
+  second and fourth (drop2&4).
 
 Parameters (automatable):
 
 | id | name | range | default |
 |----|------|-------|---------|
-| 0 | Voicing | Close, Drop2 | Close |
+| 0 | Voicing | Close, Drop2, Drop3, Drop2&4 | Close |
 | 1 | Control Zone Root | C-2 .. G5 | C2 |
 | 2 | Trigger Zone Start | C-1 .. G9 | C3 |
 

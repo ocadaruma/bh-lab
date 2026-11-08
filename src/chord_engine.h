@@ -22,12 +22,15 @@ enum class ScaleFamily : int
 };
 
 // How a trigger chord is stacked. `Close` is close position with the pressed note
-// as the top note of the chord; `Drop2` does the same but moves the second note
-// from the top down an octave.
+// as the top note of the chord. The drop voicings use the same stack but move
+// specific voices, counted from the top, down an octave: `Drop2` moves the second
+// voice, `Drop3` the third, `Drop2_4` the second and fourth.
 enum class VoicingType : int
 {
   Close = 0,
   Drop2 = 1,
+  Drop3 = 2,
+  Drop2_4 = 3,
   Count
 };
 
@@ -79,7 +82,7 @@ Chord buildStackedChord(const ScaleSelection &sel, int topKey, VoicingType voici
 const char *scaleFamilyName(ScaleFamily family);
 // "6dim", "m6dim", "7dim", "7♭5dim", for a button.
 const char *scaleFamilyShortName(ScaleFamily family);
-// "Close", "Drop2", for a voicing button.
+// "Close", "Drop2", "Drop3", "Drop2&4", for a voicing button.
 const char *voicingTypeName(VoicingType voicing);
 
 }  // namespace bhl
