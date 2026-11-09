@@ -797,6 +797,34 @@ int main()
                           first[2].key == 67 && first[3].key == 69;
     expect("3rd borrowed prev: A4 sounds C4 D4 G4 A4", borrowed, describe(first));
   }
+
+  // Suppression does not depend on the top being borrowed: with any borrow switch on,
+  // keys below the top pass through. D4 is the borrowed 3rd-top note itself, so it is
+  // not a cancel and does not trigger a chord either.
+  g_emitted.clear();
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 62, 0.8);  // D4, below A4
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool passed = first.size() == 1 && first[0].on && first[0].key == 62;
+    expect("D4 below the top passes through (top not borrowed)", passed,
+           describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 62, 0.0);
+    timeline.run(&release);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool passed = first.size() == 1 && !first[0].on && first[0].key == 62;
+    expect("its note-off passes through too", passed, describe(first));
+  }
+
   g_emitted.clear();
   {
     InputEvents press;

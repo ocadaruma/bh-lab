@@ -148,9 +148,9 @@ struct HeldChord
   // The voicing in force when the chord was triggered; re-voicing on an override uses
   // the same one so the chord keeps its shape.
   VoicingType voicing = VoicingType::Close;
-  // True when the chord's top note was borrowed at trigger time. While such a chord
-  // is held, keys below its top pass through rather than triggering.
-  bool borrowed = false;
+  // True when any borrow switch was enabled at trigger time. While such a chord is
+  // held, keys below its top pass through rather than triggering.
+  bool borrowActive = false;
   // The trigger-zone key currently cancelling this chord's borrowing (-1 when the
   // chord sounds its borrowed form). Releasing it ends the un-borrowed form.
   int overrideKey = -1;
@@ -812,12 +812,12 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
   // A cancel note re-voices an existing chord rather than sounding a new one.
   if (undoBorrow(rc, sel, note, out)) return;
 
-  // While a chord whose top was borrowed is held, keys below its top do not trigger:
-  // a cancel note reverts the borrow (handled above), everything else passes through
-  // untouched, in-scale or not.
+  // While a chord triggered with a borrow switch on is held, keys below its top do
+  // not trigger: a cancel note reverts the borrow (handled above), everything else
+  // passes through untouched, in-scale or not.
   for (auto &h : rc->held)
   {
-    if (!h.active || !h.borrowed) continue;
+    if (!h.active || !h.borrowActive) continue;
     if (note->channel >= 0 && h.channel != note->channel) continue;
     if (note->key < h.key)
     {
@@ -849,7 +849,8 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
   held->key = note->key;
   held->degree = degree;
   held->voicing = voicing;
-  held->borrowed = borrow.top != BorrowDir::None;
+  held->borrowActive = borrow.top != BorrowDir::None || borrow.second != BorrowDir::None ||
+                       borrow.third != BorrowDir::None;
   held->overrideKey = -1;
   held->count = chord.count;
 
