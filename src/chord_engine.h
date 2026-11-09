@@ -74,8 +74,9 @@ struct ScaleSelection
 bool selectScale(uint16_t pitchClassMask, ScaleSelection *out);
 
 // The stacked chord of the selected scale in the requested voicing, with `topKey`
-// as its top note. Returns a chord of count 0 if the note is not in the scale;
-// voices that fall outside 0..127 are dropped rather than wrapped.
+// as its top note and no borrowing: the equivalent of buildBorrowedChord with
+// kNoBorrow. Returns a chord of count 0 if the note is not in the scale; voices
+// that fall outside 0..127 are dropped rather than wrapped.
 Chord buildStackedChord(const ScaleSelection &sel, int topKey, VoicingType voicing);
 
 // "major 6th dim", for the interface.
@@ -84,5 +85,72 @@ const char *scaleFamilyName(ScaleFamily family);
 const char *scaleFamilyShortName(ScaleFamily family);
 // "Close", "Drop2", "Drop3", "Drop2&4", for a voicing button.
 const char *voicingTypeName(VoicingType voicing);
+
+// One borrow switch's state: a voice of the chord is replaced by the corresponding
+// voice of the adjacent chord in the scale, one scale degree below (Prev) or above
+// (Next) it. None leaves the voice as is.
+enum class BorrowDir : int
+{
+  None = 0,
+  Prev = 1,
+  Next = 2,
+  Count
+};
+
+// The borrow switches for the top three voices of a chord. Borrowing transforms the
+// stacked chords of a scale into new chords; the trigger rules then apply against
+// the transformed chords.
+struct BorrowSettings
+{
+  BorrowDir third = BorrowDir::None;   // Third voice from the top.
+  BorrowDir second = BorrowDir::None;  // Second voice from the top.
+  BorrowDir top = BorrowDir::None;     // Top voice.
+};
+
+static constexpr BorrowSettings kNoBorrow = BorrowSettings();
+
+// The root-position stack of degree `degree` of the selection's scale (degree 0 is
+// the scale's root), as pitch classes ascending: [root, 3rd, 5th, 7th], the 7th being
+// the chord's top note. Even degrees are the family's chord in inversion; odd degrees
+// are the diminished chord in inversion.
+void rootPositionChordClasses(const ScaleSelection &sel, int degree, int classes[4]);
+
+// The root-position stack of degree `degree` after the borrow switches are applied,
+// in the same layout. A borrowed voice may share a pitch class with another voice.
+void borrowedChordClasses(const ScaleSelection &sel, int degree, const BorrowSettings &borrow,
+                          int classes[4]);
+
+// The chord the trigger key `topKey` sounds: the degree whose borrowed top note has
+// topKey's pitch class (the named chord's degrees are preferred over the diminished
+// chord's), stacked with topKey on top and voiced. *outDegree, when non-null,
+// receives that degree; -1 when nothing matched (chord count 0).
+Chord buildBorrowedChord(const ScaleSelection &sel, int topKey, VoicingType voicing,
+                         const BorrowSettings &borrow, int *outDegree = nullptr);
+
+// The chord of a fixed degree with `topKey` as its top note: the degree's root-position
+// stack, borrowed and voiced. The degree's own top class sits on topKey when it equals
+// topKey's pitch class, as it does for a freshly triggered chord; otherwise all four
+// classes sit strictly below, which is how a held chord is re-voiced when the user
+// releases the note that cancelled its borrowing.
+Chord buildDegreeChord(const ScaleSelection &sel, int degree, int topKey, VoicingType voicing,
+                       const BorrowSettings &borrow);
+
+// The un-borrowed form of a held chord: the degree's root-position stack with the
+// borrowed voices swapped back to their un-borrowed counterparts in place. `triggerKey`
+// is the chord's top as it was triggered (its pitch class is the borrowed top's) and
+// `pressKey` is an un-borrowed top-three note of the degree, below the top, that the
+// user pressed. The pressed note sounds at its own key; it takes the top when it is
+// the un-borrowed top note, otherwise the top stays put and the borrowed top lands
+// one scale degree away from where the borrowed form had it.
+Chord buildOverrideChord(const ScaleSelection &sel, int degree, int triggerKey, int pressKey,
+                         VoicingType voicing);
+
+// True when pc is one of degree `degree`'s un-borrowed top three classes, for a voice
+// whose borrow switch is active -- pressing that note cancels the chord's borrowing.
+bool isCancelledBorrowVoice(const ScaleSelection &sel, int degree, int pc,
+                            const BorrowSettings &borrow);
+
+// "None", "Prev", "Next", for a borrow button.
+const char *borrowDirName(BorrowDir dir);
 
 }  // namespace bhl

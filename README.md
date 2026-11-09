@@ -15,6 +15,16 @@ An Audio Unit note effect based on **Barry Harris's stacked diminished scales**
 - The **voicing type** is a parameter: close position, or the same stack with the
   second note from the top dropped an octave (drop2), the third (drop3), or the
   second and fourth (drop2&4).
+- Each of the **top three voices can be borrowed** from the chord above or below it in
+  the scale (the borrow parameters). Borrowing transforms the scale's stacked chords
+  into new chords, and the trigger rules apply against the transformed chords -- e.g.
+  with the top voice borrowed from the next chord, C major 6th with B on top sounds
+  C E G B instead of D F Ab B. While a borrowed chord is held, keys below its top
+  note do not trigger: pressing one of its own un-borrowed top notes releases the
+  borrowed notes and sounds the originals instead, and any other note below the top
+  (in-scale or not) passes through untouched. Releasing the original trigger key while
+  a cancel note is still held transfers the chord to that note, which then owns it;
+  a key release never re-triggers notes.
 
 Parameters (automatable):
 
@@ -23,6 +33,9 @@ Parameters (automatable):
 | 0 | Voicing | Close, Drop2, Drop3, Drop2&4 | Close |
 | 1 | Control Zone Root | C-2 .. G5 | C2 |
 | 2 | Trigger Zone Start | C-1 .. G9 | C3 |
+| 3 | Borrow Top | None, Prev, Next | None |
+| 4 | Borrow 2nd | None, Prev, Next | None |
+| 5 | Borrow 3rd | None, Prev, Next | None |
 
 ## Building
 

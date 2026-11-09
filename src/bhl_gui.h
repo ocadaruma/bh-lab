@@ -21,6 +21,9 @@ struct GuiState
   std::atomic<int> selection = {0};        // ScaleSelection: family * 12 + key pitch class.
   std::atomic<uint64_t> heldControl[2] = {};  // Control-zone keys currently held.
   std::atomic<int> voicing = {0};
+  std::atomic<int> borrowTop = {0};
+  std::atomic<int> borrowSecond = {0};
+  std::atomic<int> borrowThird = {0};
   std::atomic<int> controlRoot = {48};
   std::atomic<int> triggerStart = {60};
 
@@ -32,7 +35,10 @@ struct GuiState
   {
     Voicing,
     ControlRoot,
-    TriggerStart
+    TriggerStart,
+    BorrowTop,
+    BorrowSecond,
+    BorrowThird
   };
 
   struct PendingRequest
@@ -67,6 +73,15 @@ struct GuiState
     {
       case Request::Voicing:
         voicing.store(static_cast<int>(value), std::memory_order_relaxed);
+        break;
+      case Request::BorrowTop:
+        borrowTop.store(static_cast<int>(value), std::memory_order_relaxed);
+        break;
+      case Request::BorrowSecond:
+        borrowSecond.store(static_cast<int>(value), std::memory_order_relaxed);
+        break;
+      case Request::BorrowThird:
+        borrowThird.store(static_cast<int>(value), std::memory_order_relaxed);
         break;
       case Request::ControlRoot:
         controlRoot.store(static_cast<int>(value), std::memory_order_relaxed);
@@ -171,6 +186,10 @@ ViewRect guiStepperRect(StepperId stepper, double viewWidth);
 
 // Test support: a voicing row button, by its index.
 ViewRect guiVoicingButtonRect(int index, double viewWidth);
+
+// Test support: a borrow row button. Row 0 is the top voice, 1 the second, 2 the third;
+// the index is the borrow direction (None, Prev, Next).
+ViewRect guiBorrowButtonRect(int row, int index, double viewWidth);
 
 // Test support: a key of the control octave, by its absolute MIDI key.
 ViewRect guiControlKeyRect(int key, int controlRoot);

@@ -2,8 +2,9 @@
 //
 // Notes held in the control octave identify the scale -- the family (major 6th, minor
 // 6th, 7th or 7th ♭5 diminished) and its key -- and the identification follows the
-// held notes live. Keys in the trigger zone each sound the close-position stack of
-// the selected scale with the pressed note on top; a trigger key outside the scale
+// held notes live. Keys in the trigger zone each sound the stack of the selected
+// scale with the pressed note on top, optionally borrowed (a voice replaced by the
+// adjacent chord's voice) and drop-voiced; a trigger key outside the scale
 // passes through untouched.
 //
 // Written against the plain CLAP C API; the AUv2 wrapper turns it into a .component.
@@ -61,6 +62,9 @@ enum ParamId : clap_id
   kParamVoicing = 0,
   kParamControlRoot = 1,
   kParamTriggerStart = 2,
+  kParamBorrowTop = 3,
+  kParamBorrowSecond = 4,
+  kParamBorrowThird = 5,
   kNumParams
 };
 
@@ -79,6 +83,11 @@ const ParamDef kParamDefs[kNumParams] = {
     // Note names follow Logic's convention, where middle C (MIDI 60) is C3.
     {kParamControlRoot, "Control Zone Root", 0, 115, 48, true},    // C2
     {kParamTriggerStart, "Trigger Zone Start", 0, 127, 60, true},  // C3
+    {kParamBorrowTop, "Borrow Top", 0, static_cast<double>(BorrowDir::Count) - 1, 0, true},
+    {kParamBorrowSecond, "Borrow 2nd", 0, static_cast<double>(BorrowDir::Count) - 1, 0,
+     true},
+    {kParamBorrowThird, "Borrow 3rd", 0, static_cast<double>(BorrowDir::Count) - 1, 0,
+     true},
 };
 
 static_assert(sizeof(kParamDefs) / sizeof(kParamDefs[0]) == kNumParams,
@@ -88,7 +97,8 @@ static_assert(sizeof(kParamDefs) / sizeof(kParamDefs[0]) == kNumParams,
 // be replayed into whatever that id means later. New parameters are appended at the end,
 // never inserted. The old ids (quality, inversion) belonged to the abandoned chord
 // quality feature and are not reused.
-static_assert(kParamVoicing == 0 && kParamControlRoot == 1 && kParamTriggerStart == 2,
+static_assert(kParamVoicing == 0 && kParamControlRoot == 1 && kParamTriggerStart == 2 &&
+                  kParamBorrowTop == 3 && kParamBorrowSecond == 4 && kParamBorrowThird == 5,
               "ids are frozen");
 
 const char *kNoteNames[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
@@ -133,6 +143,17 @@ struct HeldChord
   int16_t channel = 0;
   int16_t key = 0;
   int count = 0;
+  // The scale degree whose root-position stack this chord is, -1 until triggered.
+  int degree = -1;
+  // The voicing in force when the chord was triggered; re-voicing on an override uses
+  // the same one so the chord keeps its shape.
+  VoicingType voicing = VoicingType::Close;
+  // True when the chord's top note was borrowed at trigger time. While such a chord
+  // is held, keys below its top pass through rather than triggering.
+  bool borrowed = false;
+  // The trigger-zone key currently cancelling this chord's borrowing (-1 when the
+  // chord sounds its borrowed form). Releasing it ends the un-borrowed form.
+  int overrideKey = -1;
   struct Voice
   {
     int32_t noteId = -1;
@@ -167,6 +188,9 @@ struct Bhl
   std::atomic<double> params[kNumParams];
 
   std::atomic<int> selection = {0};  // C major 6th diminished until identified otherwise.
+  std::atomic<int> borrowTop = {0};
+  std::atomic<int> borrowSecond = {0};
+  std::atomic<int> borrowThird = {0};
 
   // Control-zone keys currently held, per (channel, key): counted, since a key can be
   // struck again before it is released.
@@ -224,6 +248,16 @@ struct Bhl
     gui.controlRoot.store(paramInt(kParamControlRoot), std::memory_order_relaxed);
     gui.triggerStart.store(paramInt(kParamTriggerStart), std::memory_order_relaxed);
     gui.selection.store(selection.load(std::memory_order_relaxed), std::memory_order_relaxed);
+    gui.borrowTop.store(paramInt(kParamBorrowTop), std::memory_order_relaxed);
+    gui.borrowSecond.store(paramInt(kParamBorrowSecond), std::memory_order_relaxed);
+    gui.borrowThird.store(paramInt(kParamBorrowThird), std::memory_order_relaxed);
+  }
+
+  BorrowSettings borrowSettings() const
+  {
+    return {static_cast<BorrowDir>(paramInt(kParamBorrowThird)),
+            static_cast<BorrowDir>(paramInt(kParamBorrowSecond)),
+            static_cast<BorrowDir>(paramInt(kParamBorrowTop))};
   }
 };
 
@@ -378,6 +412,15 @@ void drainGuiRequests(Bhl *rc, const clap_output_events_t *out, uint32_t time)
         break;
       case GuiState::Request::TriggerStart:
         id = kParamTriggerStart;
+        break;
+      case GuiState::Request::BorrowTop:
+        id = kParamBorrowTop;
+        break;
+      case GuiState::Request::BorrowSecond:
+        id = kParamBorrowSecond;
+        break;
+      case GuiState::Request::BorrowThird:
+        id = kParamBorrowThird;
         break;
     }
 
@@ -588,6 +631,174 @@ void handleControlKey(Bhl *rc, const clap_event_note_t *note, bool on)
   }
 }
 
+// Swaps a held chord's voices for the ones of `chord`. A voice the chord still sounds
+// keeps its existing note (no re-trigger); the old voices it does not are released,
+// and the new ones it gained are acquired.
+void revoiceHeldChord(Bhl *rc, HeldChord *held, const clap_event_note_t *note,
+                      const clap_output_events_t *out, const Chord &chord)
+{
+  // Snapshot the current voices before rewriting the list in place.
+  const int oldCount = held->count;
+  int16_t oldKeys[kStackedChordNotes] = {};
+  int32_t oldNoteIds[kStackedChordNotes] = {};
+  for (int i = 0; i < oldCount; ++i)
+  {
+    oldKeys[i] = held->voices[i].key;
+    oldNoteIds[i] = held->voices[i].noteId;
+  }
+
+  // Release the old voices the new chord does not sound.
+  for (int i = 0; i < oldCount; ++i)
+  {
+    bool shared = false;
+    for (int j = 0; j < chord.count; ++j)
+      if (chord.notes[j] == oldKeys[i]) shared = true;
+    if (shared) continue;
+    rc->gui.chordOff(oldKeys[i]);
+    releaseVoice(rc, out, note->header.time, held->channel, oldKeys[i], held->velocity,
+                 CLAP_EVENT_NOTE_OFF);
+  }
+
+  // Rebuild the voice list: shared voices carry their claim over, new ones are
+  // acquired (silently, if another chord already sounds the key).
+  int count = 0;
+  for (int j = 0; j < chord.count; ++j)
+  {
+    int carried = -1;
+    for (int i = 0; i < oldCount; ++i)
+      if (oldKeys[i] == chord.notes[j]) { carried = i; break; }
+    if (carried >= 0)
+    {
+      held->voices[count].key = oldKeys[carried];
+      held->voices[count].noteId = oldNoteIds[carried];
+    }
+    else
+    {
+      held->voices[count].key = static_cast<int16_t>(chord.notes[j]);
+      held->voices[count].noteId =
+          acquireVoice(rc, out, note->header.time, held->channel,
+                       static_cast<int16_t>(chord.notes[j]), held->velocity);
+      rc->gui.chordOn(chord.notes[j]);
+    }
+    ++count;
+  }
+  held->count = count;
+}
+
+// With a borrow switch on, pressing a held chord's own un-borrowed top note (below the
+// chord's top) cancels the borrowing: each borrowed voice swaps back to its
+// un-borrowed counterpart in place, the pressed note sounds, and the top stays where
+// it was (or takes it, when the pressed note is the un-borrowed top). The chord stays
+// tied to its trigger key; releasing this key ends the un-borrowed form. Returns true
+// when the press was consumed by an override, in which case no new chord is triggered.
+bool undoBorrow(Bhl *rc, const ScaleSelection &sel, const clap_event_note_t *note,
+                const clap_output_events_t *out)
+{
+  const BorrowSettings borrow = rc->borrowSettings();
+  if (borrow.top == BorrowDir::None && borrow.second == BorrowDir::None &&
+      borrow.third == BorrowDir::None)
+    return false;
+
+  for (auto &h : rc->held)
+  {
+    if (!h.active || h.degree < 0) continue;
+    if (note->channel >= 0 && h.channel != note->channel) continue;
+
+    // A re-strike of the chord's own cancel key is a no-op rather than a new trigger.
+    if (h.overrideKey == note->key) return true;
+    if (h.overrideKey != -1) continue;
+    if (note->key >= h.key) continue;  // The cancel note sits below the chord's top.
+    if (!isCancelledBorrowVoice(sel, h.degree, note->key % 12, borrow)) continue;
+
+    // Swap the borrowed voices back in place, with the pressed note sounding.
+    const Chord chord = buildOverrideChord(sel, h.degree, h.key, note->key, h.voicing);
+    revoiceHeldChord(rc, &h, note, out, chord);
+    h.overrideKey = note->key;
+    bhlLog("override chord key=%d degree=%d with key=%d", h.key, h.degree, note->key);
+    return true;
+  }
+
+  return false;
+}
+
+// The counterpart of undoBorrow: the release of a cancel note ends the chord's
+// un-borrowed form. A key release must not sound a new note, so the borrowed shape is
+// re-claimed only where it is already sounding; the rest of it stays silent until the
+// chord is re-triggered. Returns true when anything was restored.
+bool restoreBorrowedForm(Bhl *rc, const clap_event_note_t *note, const clap_output_events_t *out)
+{
+  const ScaleSelection sel = decodeSelection(rc->selection.load(std::memory_order_relaxed));
+  const BorrowSettings borrow = rc->borrowSettings();
+
+  bool restored = false;
+  for (auto &h : rc->held)
+  {
+    if (!h.active || h.overrideKey != note->key) continue;
+    if (note->channel >= 0 && h.channel != note->channel) continue;
+
+    const Chord chord = buildDegreeChord(sel, h.degree, h.key, h.voicing, borrow);
+
+    // Snapshot the current voices before rewriting the list in place.
+    const int oldCount = h.count;
+    int16_t oldKeys[kStackedChordNotes] = {};
+    int32_t oldNoteIds[kStackedChordNotes] = {};
+    for (int i = 0; i < oldCount; ++i)
+    {
+      oldKeys[i] = h.voices[i].key;
+      oldNoteIds[i] = h.voices[i].noteId;
+    }
+
+    // The borrowed notes that are already sounding.
+    int keep[kStackedChordNotes] = {};
+    int keepCount = 0;
+    for (int i = 0; i < chord.count; ++i)
+      if (findPooledVoice(rc, h.channel, chord.notes[i])) keep[keepCount++] = chord.notes[i];
+
+    // The un-borrowed notes the borrowed shape does not keep go quiet.
+    for (int i = 0; i < oldCount; ++i)
+    {
+      bool kept = false;
+      for (int k = 0; k < keepCount; ++k)
+        if (keep[k] == oldKeys[i]) kept = true;
+      if (kept) continue;
+      rc->gui.chordOff(oldKeys[i]);
+      releaseVoice(rc, out, note->header.time, h.channel, oldKeys[i], h.velocity,
+                   CLAP_EVENT_NOTE_OFF);
+    }
+
+    // Rebuild the voice list: a kept note carries its existing claim over (no
+    // re-trigger), and a kept note no chord claimed -- another chord is sounding it --
+    // gets a fresh one. Nothing new is ever sounded.
+    int count = 0;
+    for (int k = 0; k < keepCount; ++k)
+    {
+      int carried = -1;
+      for (int i = 0; i < oldCount; ++i)
+        if (oldKeys[i] == keep[k]) { carried = i; break; }
+      if (carried >= 0)
+      {
+        h.voices[count].key = oldKeys[carried];
+        h.voices[count].noteId = oldNoteIds[carried];
+      }
+      else
+      {
+        h.voices[count].key = static_cast<int16_t>(keep[k]);
+        h.voices[count].noteId =
+            acquireVoice(rc, out, note->header.time, h.channel, static_cast<int16_t>(keep[k]),
+                         h.velocity);
+        rc->gui.chordOn(keep[k]);
+      }
+      ++count;
+    }
+    h.count = count;
+    h.overrideKey = -1;
+    bhlLog("restore borrowed chord key=%d degree=%d kept=%d silent", h.key, h.degree, keepCount);
+    restored = true;
+  }
+
+  return restored;
+}
+
 void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_header_t *hdr,
                   const clap_output_events_t *out)
 {
@@ -596,7 +807,27 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
 
   const ScaleSelection sel = decodeSelection(rc->selection.load(std::memory_order_relaxed));
   const auto voicing = static_cast<VoicingType>(rc->paramInt(kParamVoicing));
-  const Chord chord = buildStackedChord(sel, note->key, voicing);
+  const BorrowSettings borrow = rc->borrowSettings();
+
+  // A cancel note re-voices an existing chord rather than sounding a new one.
+  if (undoBorrow(rc, sel, note, out)) return;
+
+  // While a chord whose top was borrowed is held, keys below its top do not trigger:
+  // a cancel note reverts the borrow (handled above), everything else passes through
+  // untouched, in-scale or not.
+  for (auto &h : rc->held)
+  {
+    if (!h.active || !h.borrowed) continue;
+    if (note->channel >= 0 && h.channel != note->channel) continue;
+    if (note->key < h.key)
+    {
+      if (passThrough(out, hdr)) markForwarded(rc, note->channel, note->key);
+      return;
+    }
+  }
+
+  int degree = -1;
+  const Chord chord = buildBorrowedChord(sel, note->key, voicing, borrow, &degree);
 
   // A note outside the selected scale is passed through untouched.
   if (chord.count == 0)
@@ -616,6 +847,10 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
   held->velocity = note->velocity;
   held->channel = channel;
   held->key = note->key;
+  held->degree = degree;
+  held->voicing = voicing;
+  held->borrowed = borrow.top != BorrowDir::None;
+  held->overrideKey = -1;
   held->count = chord.count;
 
   for (int i = 0; i < chord.count; ++i)
@@ -697,11 +932,29 @@ void handleEvent(Bhl *rc, const clap_event_header_t *hdr, const clap_output_even
       // nonzero from a control press.)
       handleControlKey(rc, note, false);
 
+      // Releasing the trigger key of a chord in its un-borrowed form does not kill
+      // it: the cancel key, still pressed, takes over ownership, so the notes keep
+      // sounding as long as that key is held.
+      for (auto &h : rc->held)
+      {
+        if (!h.active || h.key != note->key) continue;
+        if (note->channel >= 0 && h.channel != note->channel) continue;
+        if (h.overrideKey == -1) continue;
+        h.key = h.overrideKey;
+        h.overrideKey = -1;
+        rc->gui.rootKey.store(h.key, std::memory_order_relaxed);
+      }
+
       // Release by what the key owns rather than by where the zones sit now: the
       // boundaries are parameters and may have moved since the key went down. Deciding
       // from the current zones instead is how a chord gets left ringing.
       if (releaseAllMatching(rc, note->channel, note->key, out, hdr->time, note->velocity,
                              outType))
+        break;
+
+      // The released key may have been cancelling a held chord's borrowing; it goes
+      // back to its borrowed form.
+      if (restoreBorrowedForm(rc, note, out))
         break;
 
       if (takeForwarded(rc, note->channel, note->key))
@@ -805,6 +1058,11 @@ bool CLAP_ABI paramsValueToText(const clap_plugin_t *, clap_id id, double value,
     case kParamVoicing:
       snprintf(out, cap, "%s", voicingTypeName(static_cast<VoicingType>(v)));
       return true;
+    case kParamBorrowTop:
+    case kParamBorrowSecond:
+    case kParamBorrowThird:
+      snprintf(out, cap, "%s", borrowDirName(static_cast<BorrowDir>(v)));
+      return true;
     case kParamControlRoot:
     case kParamTriggerStart:
     {
@@ -827,6 +1085,16 @@ bool CLAP_ABI paramsTextToValue(const clap_plugin_t *, clap_id id, const char *t
     case kParamVoicing:
       for (int i = 0; i < static_cast<int>(VoicingType::Count); ++i)
         if (strcasecmp(text, voicingTypeName(static_cast<VoicingType>(i))) == 0)
+        {
+          *out = i;
+          return true;
+        }
+      break;
+    case kParamBorrowTop:
+    case kParamBorrowSecond:
+    case kParamBorrowThird:
+      for (int i = 0; i < static_cast<int>(BorrowDir::Count); ++i)
+        if (strcasecmp(text, borrowDirName(static_cast<BorrowDir>(i))) == 0)
         {
           *out = i;
           return true;
@@ -919,7 +1187,7 @@ const clap_plugin_audio_ports_t kAudioPortsExtension = {audioPortsCount, audioPo
 // clap_plugin_state
 // ---------------------------------------------------------------------------
 
-constexpr uint32_t kStateVersion = 2;
+constexpr uint32_t kStateVersion = 3;
 
 bool CLAP_ABI stateSave(const clap_plugin_t *plugin, const clap_ostream_t *stream)
 {
@@ -1116,7 +1384,7 @@ const clap_plugin_descriptor_t kDescriptor = {
     "https://github.com/",
     "",
     "",
-    "0.2.0",
+    "0.3.0",
     "Barry Harris's stacked diminished scales: the control octave identifies the scale, "
     "and trigger keys sound its stacked chords.",
     kFeatures};

@@ -167,84 +167,288 @@ bool selectScale(uint16_t pitchClassMask, ScaleSelection *out)
 
 Chord buildStackedChord(const ScaleSelection &sel, int topKey, VoicingType voicing)
 {
-  Chord chord;
+  return buildBorrowedChord(sel, topKey, voicing, kNoBorrow);
+}
 
-  if (!inRange(static_cast<int>(sel.family), static_cast<int>(ScaleFamily::Count)))
-    return chord;
+// ---------------------------------------------------------------------------
+// Borrowing
+// ---------------------------------------------------------------------------
+
+namespace
+{
+
+// The one-scale-degree shift a borrow direction applies: the adjacent chord in the
+// scale, below or above.
+int degreeShift(BorrowDir dir)
+{
+  switch (dir)
+  {
+    case BorrowDir::Prev: return -1;
+    case BorrowDir::Next: return 1;
+    default: return 0;
+  }
+}
+
+// The root-position stack of degree `degree`, ascending: [root, 3rd, 5th, 7th]. The
+// root is the degree's own scale note; the other three classes come from the chord the
+// degree belongs to -- the family's named chord on even degrees, the diminished chord
+// on odd degrees -- and always sit above the root, within its octave.
+void rootPositionStack(const FamilyDef &def, int keyPc, int degree, int classes[4])
+{
+  const int root = (keyPc + def.offsets[degree]) % 12;
+  const uint16_t mask = (degree % 2 == 0) ? rotateMask(maskOfIntervals(def.named,
+                                                                       kStackedChordNotes),
+                                                       keyPc % 12)
+                                          : rotateMask(
+                                                maskOfIntervals(kDimIntervals, kStackedChordNotes),
+                                                (keyPc + 2) % 12);
+
+  classes[0] = root;
+  int idx = 1;
+  for (int c = root + 1; idx < kStackedChordNotes; ++c)
+    if ((mask >> (c % 12)) & 1u) classes[idx++] = c % 12;
+}
+
+void applyDropVoicing(int voices[], int &count, VoicingType voicing);
+
+// The stack built from four pitch classes with `topKey` on top and the requested
+// voicing applied. The stack's own top class (classes[3]) sits on topKey when it
+// equals topKey's pitch class; any other occurrence of that class sits strictly
+// below, as does every other class.
+Chord stackWithVoicing(const int classes[4], int topKey, VoicingType voicing)
+{
+  Chord chord;
   if (topKey < 0 || topKey > 127) return chord;
   const int pc = topKey % 12;
 
-  // Which stacked chord the pressed note belongs to: named or diminished. The two
-  // partitions of a scale's eight notes are disjoint, so at most one can contain it.
-  uint16_t named = namedMaskAt(sel.family, sel.keyPc);
-  uint16_t covering;
-  if (covers(1u << pc, named))
-    covering = named;
-  else if (covers(1u << pc, dimChordPitchClasses((sel.keyPc + 2) % 12)))
-    covering = dimChordPitchClasses((sel.keyPc + 2) % 12);
-  else
-    return chord;
-
   int voices[kStackedChordNotes] = {};
   int count = 0;
-  for (int c = 0; c < 12; ++c)
+  for (int j = 0; j < kStackedChordNotes; ++j)
   {
-    if (!((covering >> c) & 1u)) continue;
-
-    // The pressed note is the top voice; every other voice is the same class strictly
-    // below it, which keeps the stack close-position.
-    const int voice = (c == pc) ? topKey : topKey - ((pc - c + 12) % 12);
+    const int c = classes[j] % 12;
+    const int voice = (j == kStackedChordNotes - 1 && c == pc)    // the stack's top
+                         ? topKey
+                         : (c == pc) ? topKey - 12                 // duplicate class below
+                                     : topKey - ((pc - c + 12) % 12);
     if (voice < 0 || voice > 127) continue;
     voices[count++] = voice;
   }
 
-  // Drop voicings move specific voices, counted from the top, down an octave. When
-  // the stack sits low, a moved voice falls below key 0 and is dropped rather than
-  // wrapped.
-  if (voicing != VoicingType::Close && count >= 2)
-  {
-    // Voice indices ordered by pitch, highest first.
-    int order[kStackedChordNotes] = {};
-    for (int i = 0; i < count; ++i) order[i] = i;
-    std::sort(order, order + count,
-              [&](int a, int b) { return voices[a] > voices[b]; });
-
-    int dropPos[kStackedChordNotes] = {0, 1, 2, 3};
-    int dropCount = 0;
-    switch (voicing)
-    {
-      case VoicingType::Drop2:
-        dropPos[0] = 1;
-        dropCount = 1;
-        break;  // 2nd from the top
-      case VoicingType::Drop3: dropPos[0] = 2; dropCount = 1; break;  // 3rd from the top
-      case VoicingType::Drop2_4:
-        dropPos[0] = 1;
-        dropPos[1] = 3;
-        dropCount = 2;
-        break;                                                  // 2nd and 4th
-      default: break;
-    }
-
-    bool removed[kStackedChordNotes] = {};
-    for (int i = 0; i < dropCount; ++i)
-    {
-      const int idx = order[dropPos[i]];
-      if (voices[idx] - 12 < 0)
-        removed[idx] = true;
-      else
-        voices[idx] -= 12;
-    }
-    int kept = 0;
-    for (int i = 0; i < count; ++i)
-      if (!removed[i]) voices[kept++] = voices[i];
-    count = kept;
-  }
+  applyDropVoicing(voices, count, voicing);
 
   std::sort(voices, voices + count);
   for (int i = 0; i < count; ++i) chord.notes[i] = voices[i];
   chord.count = count;
   return chord;
+}
+
+// Drop voicings move specific voices, counted from the top, down an octave. When the
+// stack sits low, a moved voice falls below key 0 and is dropped rather than wrapped.
+void applyDropVoicing(int voices[], int &count, VoicingType voicing)
+{
+  if (voicing == VoicingType::Close || count < 2) return;
+
+  // Voice indices ordered by pitch, highest first.
+  int order[kStackedChordNotes] = {};
+  for (int i = 0; i < count; ++i) order[i] = i;
+  std::sort(order, order + count,
+            [&](int a, int b) { return voices[a] > voices[b]; });
+
+  int dropPos[kStackedChordNotes] = {0, 1, 2, 3};
+  int dropCount = 0;
+  switch (voicing)
+  {
+    case VoicingType::Drop2:
+      dropPos[0] = 1;
+      dropCount = 1;
+      break;  // 2nd from the top
+    case VoicingType::Drop3: dropPos[0] = 2; dropCount = 1; break;  // 3rd from the top
+    case VoicingType::Drop2_4:
+      dropPos[0] = 1;
+      dropPos[1] = 3;
+      dropCount = 2;
+      break;  // 2nd and 4th
+    default: break;
+  }
+
+  bool removed[kStackedChordNotes] = {};
+  for (int i = 0; i < dropCount; ++i)
+  {
+    const int idx = order[dropPos[i]];
+    if (voices[idx] - 12 < 0)
+      removed[idx] = true;
+    else
+      voices[idx] -= 12;
+  }
+  int kept = 0;
+  for (int i = 0; i < count; ++i)
+    if (!removed[i]) voices[kept++] = voices[i];
+  count = kept;
+}
+
+}  // namespace
+
+void rootPositionChordClasses(const ScaleSelection &sel, int degree, int classes[4])
+{
+  const int f = static_cast<int>(sel.family);
+  if (!inRange(f, static_cast<int>(ScaleFamily::Count))) return;
+  rootPositionStack(kFamilies[f], sel.keyPc, inRange(degree, kScaleNoteCount) ? degree : 0,
+                    classes);
+}
+
+void borrowedChordClasses(const ScaleSelection &sel, int degree, const BorrowSettings &borrow,
+                          int classes[4])
+{
+  const int f = static_cast<int>(sel.family);
+  if (!inRange(f, static_cast<int>(ScaleFamily::Count))) return;
+  const int d = inRange(degree, kScaleNoteCount) ? degree : 0;
+
+  int rootPos[kScaleNoteCount][kStackedChordNotes];
+  for (int i = 0; i < kScaleNoteCount; ++i) rootPositionStack(kFamilies[f], sel.keyPc, i,
+                                                              rootPos[i]);
+
+  // Voice j (1..3 from the root) is taken from the chord one scale degree away when
+  // its switch is set: the adjacent chord's voice in the same stack position.
+  const int shift[3] = {degreeShift(borrow.third), degreeShift(borrow.second),
+                        degreeShift(borrow.top)};
+  classes[0] = rootPos[d][0];
+  for (int j = 1; j < kStackedChordNotes; ++j)
+    classes[j] = rootPos[(d + shift[j - 1] + kScaleNoteCount) % kScaleNoteCount][j];
+}
+
+Chord buildDegreeChord(const ScaleSelection &sel, int degree, int topKey, VoicingType voicing,
+                       const BorrowSettings &borrow)
+{
+  const int f = static_cast<int>(sel.family);
+  if (!inRange(f, static_cast<int>(ScaleFamily::Count))) return Chord();
+  if (!inRange(degree, kScaleNoteCount)) return Chord();
+
+  int classes[kStackedChordNotes];
+  borrowedChordClasses(sel, degree, borrow, classes);
+  return stackWithVoicing(classes, topKey, voicing);
+}
+
+Chord buildBorrowedChord(const ScaleSelection &sel, int topKey, VoicingType voicing,
+                         const BorrowSettings &borrow, int *outDegree)
+{
+  if (outDegree) *outDegree = -1;
+
+  const int f = static_cast<int>(sel.family);
+  if (!inRange(f, static_cast<int>(ScaleFamily::Count))) return Chord();
+  if (topKey < 0 || topKey > 127) return Chord();
+  const int pc = topKey % 12;
+
+  // The degree whose borrowed top note is the pressed class. The eight borrowed tops
+  // are eight distinct pitch classes, so at most one named and one diminished degree
+  // can match; the named one wins, mirroring selectScale's named-over-dim tiers.
+  for (int parity = 0; parity < 2; ++parity)
+    for (int d = parity; d < kScaleNoteCount; d += 2)
+    {
+      int classes[kStackedChordNotes];
+      borrowedChordClasses(sel, d, borrow, classes);
+      if (classes[kStackedChordNotes - 1] % 12 == pc)
+      {
+        if (outDegree) *outDegree = d;
+        return stackWithVoicing(classes, topKey, voicing);
+      }
+    }
+
+  return Chord();  // Outside the scale: the trigger key passes through.
+}
+
+Chord buildOverrideChord(const ScaleSelection &sel, int degree, int triggerKey, int pressKey,
+                         VoicingType voicing)
+{
+  Chord chord;
+
+  const int f = static_cast<int>(sel.family);
+  if (!inRange(f, static_cast<int>(ScaleFamily::Count))) return chord;
+  if (!inRange(degree, kScaleNoteCount)) return chord;
+  if (triggerKey < 0 || triggerKey > 127 || pressKey < 0 || pressKey > 127) return chord;
+  if (pressKey >= triggerKey) return chord;
+
+  int u[kStackedChordNotes];
+  rootPositionStack(kFamilies[f], sel.keyPc, degree, u);
+
+  const int T = triggerKey % 12;
+  const int l = pressKey % 12;
+
+  // The un-borrowed slot (1..3 from the root) the pressed note corresponds to.
+  int pressedSlot = -1;
+  for (int j = 1; j < kStackedChordNotes; ++j)
+    if (u[j] % 12 == l) pressedSlot = j;
+
+  int voices[kStackedChordNotes] = {};
+  int count = 0;
+
+  if (pressedSlot == kStackedChordNotes - 1)
+  {
+    // The pressed note is the un-borrowed top: it takes the top, the rest sit
+    // strictly below it.
+    voices[count++] = pressKey;
+    for (int j = 0; j < kStackedChordNotes - 1; ++j)
+    {
+      const int key = pressKey - ((l - u[j] + 12) % 12);
+      if (key < 0 || key > 127) continue;
+      voices[count++] = key;
+    }
+  }
+  else if (pressedSlot > 0)
+  {
+    // The top stays where it was; the pressed note sits at its own key, and the other
+    // slots land where the same stack would with the top class on top. The un-borrowed
+    // top is one scale degree from the borrowed top's class, so it moves there.
+    for (int j = 0; j < kStackedChordNotes; ++j)
+    {
+      int key;
+      if (j == pressedSlot)
+        key = pressKey;
+      else if (j == kStackedChordNotes - 1)
+      {
+        int d = ((u[j] - T) % 12 + 12) % 12;
+        key = triggerKey + (d > 6 ? d - 12 : d);
+      }
+      else if (u[j] % 12 == T)
+        key = triggerKey - 12;
+      else
+        key = triggerKey - ((T - u[j] + 12) % 12);
+      if (key < 0 || key > 127) continue;
+      voices[count++] = key;
+    }
+  }
+  else
+    return chord;  // The pressed note is not an un-borrowed voice of this degree.
+
+  applyDropVoicing(voices, count, voicing);
+
+  std::sort(voices, voices + count);
+  for (int i = 0; i < count; ++i) chord.notes[i] = voices[i];
+  chord.count = count;
+  return chord;
+}
+
+bool isCancelledBorrowVoice(const ScaleSelection &sel, int degree, int pc,
+                            const BorrowSettings &borrow)
+{
+  const int f = static_cast<int>(sel.family);
+  if (!inRange(f, static_cast<int>(ScaleFamily::Count))) return false;
+  if (!inRange(degree, kScaleNoteCount)) return false;
+
+  int classes[kStackedChordNotes];
+  rootPositionStack(kFamilies[f], sel.keyPc, degree, classes);
+
+  const BorrowDir dir[3] = {borrow.third, borrow.second, borrow.top};
+  for (int j = 1; j < kStackedChordNotes; ++j)
+    if (dir[j - 1] != BorrowDir::None && classes[j] % 12 == pc) return true;
+
+  return false;
+}
+
+const char *borrowDirName(BorrowDir dir)
+{
+  static const char *names[static_cast<int>(BorrowDir::Count)] = {"None", "Prev", "Next"};
+  const int d = static_cast<int>(dir);
+  return inRange(d, static_cast<int>(BorrowDir::Count)) ? names[d] : "?";
 }
 
 const char *scaleFamilyName(ScaleFamily family)

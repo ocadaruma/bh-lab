@@ -15,7 +15,7 @@ namespace
 {
 
 constexpr uint32_t kViewWidth = 700;
-constexpr uint32_t kViewHeight = 340;
+constexpr uint32_t kViewHeight = 452;
 
 // The chord keyboard spans C1..C6, which covers the default zones with room either side.
 constexpr int kBedLow = 36;
@@ -24,20 +24,24 @@ constexpr int kBedHigh = 96;
 constexpr CGFloat kPad = 18;
 constexpr CGFloat kControlKeyboardWidth = 430;
 constexpr CGFloat kLabelWidth = 60;
+constexpr CGFloat kBorrowLabelWidth = 82;
 constexpr CGFloat kStepperWidth = 170;
 constexpr CGFloat kButtonGap = 8;
 
 // Row geometry.
 constexpr CGFloat kFamilyRowY = 66;
 constexpr CGFloat kVoicingRowY = 102;
+constexpr CGFloat kBorrowTopRowY = 138;
+constexpr CGFloat kBorrowSecondRowY = 174;
+constexpr CGFloat kBorrowThirdRowY = 210;
 constexpr CGFloat kRowHeight = 30;
 
-constexpr CGFloat kChordLabelY = 138;
-constexpr CGFloat kChordKeyboardY = 154;
+constexpr CGFloat kChordLabelY = 246;
+constexpr CGFloat kChordKeyboardY = 262;
 constexpr CGFloat kChordKeyboardHeight = 72;
 
-constexpr CGFloat kControlLabelY = 234;
-constexpr CGFloat kControlKeyboardY = 250;
+constexpr CGFloat kControlLabelY = 340;
+constexpr CGFloat kControlKeyboardY = 356;
 constexpr CGFloat kControlKeyboardHeight = 70;
 
 NSRect familyButtonRect(int index, CGFloat viewWidth)
@@ -56,6 +60,16 @@ NSRect voicingButtonRect(int index, CGFloat viewWidth)
   const int count = static_cast<int>(VoicingType::Count);
   const CGFloat w = (total - kButtonGap * (count - 1)) / count;
   return NSMakeRect(x0 + index * (w + kButtonGap), kVoicingRowY, w, kRowHeight);
+}
+
+NSRect borrowButtonRect(int row, int index, CGFloat viewWidth)
+{
+  static const CGFloat kRowY[3] = {kBorrowTopRowY, kBorrowSecondRowY, kBorrowThirdRowY};
+  const CGFloat x0 = kPad + kBorrowLabelWidth + 6;
+  const CGFloat total = viewWidth - kPad - x0;
+  const int count = static_cast<int>(BorrowDir::Count);
+  const CGFloat w = (total - kButtonGap * (count - 1)) / count;
+  return NSMakeRect(x0 + index * (w + kButtonGap), kRowY[row], w, kRowHeight);
 }
 
 NSRect triggerStartStepperRect(CGFloat viewWidth)
@@ -221,6 +235,9 @@ struct Snapshot
   int selection = -1;
   uint64_t heldControl[2] = {};
   int voicing = -1;
+  int borrowTop = -1;
+  int borrowSecond = -1;
+  int borrowThird = -1;
   int controlRoot = -1;
   int triggerStart = -1;
 
@@ -230,7 +247,9 @@ struct Snapshot
            chord[0] == o.chord[0] && chord[1] == o.chord[1] &&
            rootKey == o.rootKey && selection == o.selection &&
            heldControl[0] == o.heldControl[0] && heldControl[1] == o.heldControl[1] &&
-           voicing == o.voicing && controlRoot == o.controlRoot &&
+           voicing == o.voicing && borrowTop == o.borrowTop &&
+           borrowSecond == o.borrowSecond && borrowThird == o.borrowThird &&
+           controlRoot == o.controlRoot &&
            triggerStart == o.triggerStart;
   }
 };
@@ -247,6 +266,9 @@ Snapshot takeSnapshot(GuiState *state)
   s.heldControl[0] = state->heldControl[0].load(std::memory_order_relaxed);
   s.heldControl[1] = state->heldControl[1].load(std::memory_order_relaxed);
   s.voicing = state->voicing.load(std::memory_order_relaxed);
+  s.borrowTop = state->borrowTop.load(std::memory_order_relaxed);
+  s.borrowSecond = state->borrowSecond.load(std::memory_order_relaxed);
+  s.borrowThird = state->borrowThird.load(std::memory_order_relaxed);
   s.controlRoot = state->controlRoot.load(std::memory_order_relaxed);
   s.triggerStart = state->triggerStart.load(std::memory_order_relaxed);
   return s;
@@ -480,6 +502,24 @@ Snapshot takeSnapshot(GuiState *state)
             selected:i == _lastDrawn.voicing
                inert:NO];
 
+  // Borrow rows: each of the top three voices, Prev / None / Next.
+  static const char *kBorrowRowLabels[3] = {"BORROW TOP", "BORROW 2ND", "BORROW 3RD"};
+  static const CGFloat kRowY[3] = {kBorrowTopRowY, kBorrowSecondRowY, kBorrowThirdRowY};
+  const int kBorrowRowValues[3] = {_lastDrawn.borrowTop, _lastDrawn.borrowSecond,
+                                   _lastDrawn.borrowThird};
+  for (int row = 0; row < 3; ++row)
+  {
+    const int value = kBorrowRowValues[row];
+    drawText([NSString stringWithUTF8String:kBorrowRowLabels[row]],
+             NSMakeRect(kPad, kRowY[row] + 9, kBorrowLabelWidth, 14), 9.5, gray(0.45),
+             NSTextAlignmentLeft, NSFontWeightSemibold);
+    for (int i = 0; i < static_cast<int>(BorrowDir::Count); ++i)
+      [self drawButton:borrowButtonRect(row, i, [self bounds].size.width)
+                 title:[NSString stringWithUTF8String:borrowDirName(static_cast<BorrowDir>(i))]
+              selected:i == value
+                 inert:NO];
+  }
+
   // Chord keyboard.
   drawText(@"GENERATED CHORD", NSMakeRect(kPad, kChordLabelY, 400, 14), 9.5, gray(0.45),
            NSTextAlignmentLeft, NSFontWeightSemibold);
@@ -535,8 +575,8 @@ Snapshot takeSnapshot(GuiState *state)
   const NSPoint p = [self convertPoint:[event locationInWindow] fromView:nil];
   const CGFloat viewWidth = [self bounds].size.width;
 
-  // The voicing row is clickable; the family row is a readout, since the held control
-  // notes decide it.
+  // The voicing row and the borrow rows are clickable; the family row is a readout,
+  // since the held control notes decide it.
   {
     const int count = static_cast<int>(VoicingType::Count);
     for (int i = 0; i < count; ++i)
@@ -548,6 +588,22 @@ Snapshot takeSnapshot(GuiState *state)
         return;
       }
     }
+  }
+
+  {
+    static const GuiState::Request kBorrowRowRequests[3] = {GuiState::Request::BorrowTop,
+                                                            GuiState::Request::BorrowSecond,
+                                                            GuiState::Request::BorrowThird};
+    for (int row = 0; row < 3; ++row)
+      for (int i = 0; i < static_cast<int>(BorrowDir::Count); ++i)
+      {
+        if (NSPointInRect(p, borrowButtonRect(row, i, viewWidth)))
+        {
+          _state->request(kBorrowRowRequests[row], i);
+          [self setNeedsDisplay:YES];
+          return;
+        }
+      }
   }
 
   {
@@ -637,6 +693,13 @@ ViewRect guiStepperRect(StepperId stepper, double viewWidth)
 ViewRect guiVoicingButtonRect(int index, double viewWidth)
 {
   const NSRect r = voicingButtonRect(index, viewWidth);
+  return {r.origin.x, r.origin.y, r.size.width, r.size.height};
+}
+
+ViewRect guiBorrowButtonRect(int row, int index, double viewWidth)
+{
+  if (row < 0 || row > 2) return {};
+  const NSRect r = borrowButtonRect(row, index, viewWidth);
   return {r.origin.x, r.origin.y, r.size.width, r.size.height};
 }
 

@@ -67,3 +67,22 @@ Based on Barry Harris's diminished scale, the plugin triggers a chord
   * drop2: the same stack with the second note from the top moved down an octave (G2 A3 C4 E4)
   * drop3: the third note from the top moved down an octave (G3 A2 C4 E4)
   * drop2&4: the second and fourth notes from the top moved down an octave (G2 C3 A3 E4)
+
+## Borrowing
+- Borrowing is a concept to substitute a part of the chord with a note from next or previous chord in the scale, to make the chord sound more interesting.
+  * e.g. Assuming C major 6th diminished scale is selected
+    - For chord C E G A, if we "borrow" a note for A from next, it will become C E G B
+    - Similarly, if we borrow notes for G and A from next, it will become C E Ab B
+    - Borrowing is allowed for top 3 notes of the chord, and borrow direction is either from next or previous chord in the scale
+- In this plugin, this is implemented by below:
+  * Add 3 "borrow" switches for top 3 notes, each switch has 3 states: borrow from previous, no borrowing, borrow from next
+    * Borrowing will transform the stacked chords to new chords
+  * The trigger rule is same, but it against the new transformed chords. e.g.
+    * Assume C major 6th diminished scale, and close voicing
+    * Originally, when we press B, it will trigger D F Ab B
+    * But if we set "borrow top note from next", C E G B will be triggered instead of D F Ab B
+  * Also, when any borrow switch is changed, trigger-zone behavior changes a bit:
+    * When any borrow switch is set and borrowed not is pressed, if (below-top) non borrow note is additionally pressed, all (already triggered) borrowed notes will be released, and the chord will be triggered with the non-borrow notes instead
+    * e.g. Assume C major 6th diminished scale, and close voicing
+      - If we set "borrow top and 2nd-top notes from next", and press B, it will trigger C E Ab B first
+      - In the middle of holding B, if we additionally press A, it will release Ab B, and trigger G and A instead

@@ -212,5 +212,8 @@ inline const clap_plugin_t *makePlugin()
 constexpr clap_id kVoicing = 0;
 constexpr clap_id kControlRoot = 1;
 constexpr clap_id kTriggerStart = 2;
+constexpr clap_id kBorrowTop = 3;
+constexpr clap_id kBorrowSecond = 4;
+constexpr clap_id kBorrowThird = 5;
 
 }  // namespace bhl_test
