@@ -589,11 +589,12 @@ Zone zoneOf(Bhl *rc, int key)
 }
 
 // A control-zone press is silent, but it drives which scale is in force: the held
-// control notes identify the scale on every press, and the last valid identification
-// is kept afterwards. A release shrinks the held set but is not re-identified from,
-// since releasing notes cannot add information and re-identifying on the way down
-// would latch the partial sets' selections. When the held set becomes empty the plugin
-// is in pass-through mode: no scale is in force, so trigger keys sound nothing.
+// control notes identify the scale on every change, and the last valid identification
+// is kept afterwards. Re-identifying on the way down is safe: the held set only
+// shrinks, so a release can never add a match that a press would have made -- it
+// can at most drop matches the full set made, in which case selectScale keeps the
+// current selection. When the held set becomes empty the plugin is in pass-through
+// mode: no scale is in force, so trigger keys sound nothing.
 void handleControlKey(Bhl *rc, const clap_event_note_t *note, bool on)
 {
   if (note->key < 0 || note->key > 127) return;
@@ -615,7 +616,8 @@ void handleControlKey(Bhl *rc, const clap_event_note_t *note, bool on)
     rc->gui.controlOff(note->key);
   }
 
-  if (!on) return;
+  // Nothing held means pass-through mode; the latched selection is left as is.
+  if (rc->controlHeldKeys == 0) return;
 
   uint16_t mask = 0;
   for (int c = 0; c < 16; ++c)
@@ -626,8 +628,8 @@ void handleControlKey(Bhl *rc, const clap_event_note_t *note, bool on)
   if (selectScale(mask, &sel))
   {
     rc->selection.store(encodeSelection(sel), std::memory_order_relaxed);
-    bhlLog("select mask=%04x -> family=%d key=%d (heldKeys=%d)", mask, (int)sel.family, sel.keyPc,
-           rc->controlHeldKeys);
+    bhlLog("select mask=%04x -> family=%d key=%d (heldKeys=%d, %s)", mask, (int)sel.family,
+           sel.keyPc, rc->controlHeldKeys, on ? "press" : "release");
   }
 }
 
