@@ -151,6 +151,11 @@ struct HeldChord
   // True when any borrow switch was enabled at trigger time. While such a chord is
   // held, keys below its top pass through rather than triggering.
   bool borrowActive = false;
+  // True when the top was borrowed from the previous chord at trigger time. The
+  // un-borrowed top then sits ABOVE the borrowed one, so the whole space above the
+  // chord's top belongs to the session: the cancel note reverts the chord, every
+  // other note passes through.
+  bool topBorrowPrev = false;
   // The trigger-zone key currently cancelling this chord's borrowing (-1 when the
   // chord sounds its borrowed form). Releasing it ends the un-borrowed form.
   int overrideKey = -1;
@@ -720,10 +725,10 @@ bool undoBorrow(Bhl *rc, const ScaleSelection &sel, const clap_event_note_t *not
     if (!isCancelledBorrowVoice(sel, h.degree, note->key % 12, borrow)) continue;
 
     // The cancel note sits below the chord's top, except the un-borrowed top when the
-    // top is borrowed from the previous chord, which sits above it.
+    // top was borrowed from the previous chord, which sits above it.
     int classes[kStackedChordNotes];
     rootPositionChordClasses(sel, h.degree, classes);
-    const bool aboveTop = borrow.top == BorrowDir::Prev &&
+    const bool aboveTop = h.topBorrowPrev &&
                           classes[kStackedChordNotes - 1] % 12 == note->key % 12;
     if (aboveTop ? note->key <= h.key : note->key >= h.key) continue;
 
@@ -832,10 +837,10 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
 
   // While a chord triggered with a borrow switch on is held, keys below its top do
   // not trigger: a cancel note reverts the borrow (handled above), everything else
-  // passes through untouched, in-scale or not. Above the top, the only special key
-  // is the un-borrowed top sitting over a top borrowed from the previous chord:
-  // undoBorrow consumed it when the session's single revert was free, so once the
-  // revert is spent it passes through rather than triggering a chord of its own.
+  // passes through untouched, in-scale or not. When the top was borrowed from the
+  // previous chord the space above its top belongs to the session too: the
+  // un-borrowed top reverts the chord (handled above), every other note above --
+  // in-scale or not -- passes through rather than triggering a chord of its own.
   for (auto &h : rc->held)
   {
     if (!h.active || !h.borrowActive) continue;
@@ -845,16 +850,10 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
       if (passThrough(out, hdr)) markForwarded(rc, note->channel, note->key);
       return;
     }
-    if (h.overrideUsed)
+    if (h.topBorrowPrev)
     {
-      int classes[kStackedChordNotes];
-      rootPositionChordClasses(sel, h.degree, classes);
-      if (borrow.top == BorrowDir::Prev &&
-          classes[kStackedChordNotes - 1] % 12 == note->key % 12)
-      {
-        if (passThrough(out, hdr)) markForwarded(rc, note->channel, note->key);
-        return;
-      }
+      if (passThrough(out, hdr)) markForwarded(rc, note->channel, note->key);
+      return;
     }
   }
 
@@ -883,6 +882,7 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
   held->voicing = voicing;
   held->borrowActive = borrow.top != BorrowDir::None || borrow.second != BorrowDir::None ||
                        borrow.third != BorrowDir::None;
+  held->topBorrowPrev = borrow.top == BorrowDir::Prev;
   held->overrideKey = -1;
   held->overrideUsed = false;
   held->count = chord.count;

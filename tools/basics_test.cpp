@@ -890,6 +890,44 @@ int main()
                           first[2].key == 69 && first[3].key == 71;
     expect("top borrowed prev: B4 sounds E4 G4 A4 B4", borrowed, describe(first));
   }
+  // The whole space above the top belongs to the session: any note over B4 passes
+  // through rather than triggering another chord, in-scale or not.
+  g_emitted.clear();
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 74, 0.8);  // D5, above B4, in-scale
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool passed = first.size() == 1 && first[0].on && first[0].key == 74;
+    expect("D5 above the prev-borrowed top passes through", passed, describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 76, 0.8);  // E5, above B4, out of scale
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool passed = first.size() == 1 && first[0].on && first[0].key == 76;
+    expect("an out-of-scale note above the prev-borrowed top passes through too",
+           passed, describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 74, 0.0);
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 76, 0.0);
+    timeline.run(&release);
+  }
+  {
+    int offs = 0;
+    for (const auto &e : g_emitted)
+      if (!e.on) ++offs;
+    expect("the pass-through note-offs pass through too", offs == 2, describe(g_emitted));
+  }
   g_emitted.clear();
   {
     InputEvents press;
