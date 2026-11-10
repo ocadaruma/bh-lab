@@ -191,9 +191,6 @@ ViewRect guiVoicingButtonRect(int index, double viewWidth);
 // the index is the borrow direction (None, Prev, Next).
 ViewRect guiBorrowButtonRect(int row, int index, double viewWidth);
 
-// Test support: a key of the control octave, by its absolute MIDI key.
-ViewRect guiControlKeyRect(int key, int controlRoot);
-
 // Platform view lifecycle. The returned handle is an NSView* on macOS.
 void *guiCreate(GuiState *state);
 void guiDestroy(void *view);

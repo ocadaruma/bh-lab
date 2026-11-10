@@ -1,10 +1,13 @@
-// Cocoa view for bh-lab: the selected scale, the chord being generated, and the control
-// octave with the held notes and the selected scale's notes drawn onto the keys.
+// Cocoa view for bh-lab: the selected scale in the header, and a single 88-key board
+// in which the control zone, the trigger zone, and the active scale / chord / notes
+// are drawn by color.
 //
 // Compiled without ARC (the CMake default for .mm), so the view is retained and released
 // manually by guiCreate/guiDestroy.
 
 #import <Cocoa/Cocoa.h>
+
+#include <algorithm>
 
 #include "bhl_gui.h"
 #include "chord_engine.h"
@@ -14,44 +17,32 @@ using namespace bhl;
 namespace
 {
 
-constexpr uint32_t kViewWidth = 700;
-constexpr uint32_t kViewHeight = 452;
+constexpr uint32_t kViewWidth = 810;
+constexpr uint32_t kViewHeight = 346;
 
-// The chord keyboard spans C1..C6, which covers the default zones with room either side.
-constexpr int kBedLow = 36;
-constexpr int kBedHigh = 96;
+// The keyboard is a full 88-key board (A0..G8), covering every zone with room either
+// side.
+constexpr int kKeyboardLow = 21;
+constexpr int kKeyboardHigh = 108;
 
 constexpr CGFloat kPad = 18;
-constexpr CGFloat kControlKeyboardWidth = 430;
 constexpr CGFloat kLabelWidth = 60;
 constexpr CGFloat kBorrowLabelWidth = 82;
 constexpr CGFloat kStepperWidth = 170;
 constexpr CGFloat kButtonGap = 8;
 
 // Row geometry.
-constexpr CGFloat kFamilyRowY = 66;
-constexpr CGFloat kVoicingRowY = 102;
-constexpr CGFloat kBorrowTopRowY = 138;
-constexpr CGFloat kBorrowSecondRowY = 174;
-constexpr CGFloat kBorrowThirdRowY = 210;
+constexpr CGFloat kVoicingRowY = 72;
+constexpr CGFloat kBorrowTopRowY = 108;
+constexpr CGFloat kBorrowSecondRowY = 144;
+constexpr CGFloat kBorrowThirdRowY = 180;
 constexpr CGFloat kRowHeight = 30;
 
-constexpr CGFloat kChordLabelY = 246;
-constexpr CGFloat kChordKeyboardY = 262;
-constexpr CGFloat kChordKeyboardHeight = 72;
-
-constexpr CGFloat kControlLabelY = 340;
-constexpr CGFloat kControlKeyboardY = 356;
-constexpr CGFloat kControlKeyboardHeight = 70;
-
-NSRect familyButtonRect(int index, CGFloat viewWidth)
-{
-  const CGFloat x0 = kPad + kLabelWidth + 6;
-  const CGFloat total = viewWidth - kPad - x0;
-  const int count = static_cast<int>(ScaleFamily::Count);
-  const CGFloat w = (total - kButtonGap * (count - 1)) / count;
-  return NSMakeRect(x0 + index * (w + kButtonGap), kFamilyRowY, w, kRowHeight);
-}
+// The keyboard sits a gap below the stacking rows: it controls the zones, which is a
+// different role than the voicing / borrow picks above.
+constexpr CGFloat kKeyboardLabelY = 240;
+constexpr CGFloat kKeyboardY = 256;
+constexpr CGFloat kKeyboardHeight = 72;
 
 NSRect voicingButtonRect(int index, CGFloat viewWidth)
 {
@@ -72,19 +63,28 @@ NSRect borrowButtonRect(int row, int index, CGFloat viewWidth)
   return NSMakeRect(x0 + index * (w + kButtonGap), kRowY[row], w, kRowHeight);
 }
 
+// The borrow buttons read Prev | None | Next, left to right.
+const int kBorrowDisplayOrder[3] = {static_cast<int>(BorrowDir::Prev),
+                                    static_cast<int>(BorrowDir::None),
+                                    static_cast<int>(BorrowDir::Next)};
+
+// The two zone steppers share the keyboard label row, side by side on the right: the
+// control start on the left, the trigger start at the far right.
 NSRect triggerStartStepperRect(CGFloat viewWidth)
 {
-  return NSMakeRect(viewWidth - kPad - kStepperWidth, kChordLabelY - 2, kStepperWidth, 20);
+  return NSMakeRect(viewWidth - kPad - kStepperWidth, kKeyboardLabelY - 2, kStepperWidth,
+                    20);
 }
 
 NSRect controlRootStepperRect(CGFloat viewWidth)
 {
-  return NSMakeRect(viewWidth - kPad - kStepperWidth, kControlLabelY - 2, kStepperWidth, 20);
+  return NSMakeRect(viewWidth - kPad - kStepperWidth * 2 - kButtonGap, kKeyboardLabelY - 2,
+                    kStepperWidth, 20);
 }
 
-NSRect controlKeyboardRect()
+NSRect keyboardRect(CGFloat viewWidth)
 {
-  return NSMakeRect(kPad, kControlKeyboardY, kControlKeyboardWidth, kControlKeyboardHeight);
+  return NSMakeRect(kPad, kKeyboardY, viewWidth - 2 * kPad, kKeyboardHeight);
 }
 
 NSColor *gray(CGFloat v, CGFloat a = 1.0)
@@ -92,39 +92,44 @@ NSColor *gray(CGFloat v, CGFloat a = 1.0)
   return [NSColor colorWithCalibratedWhite:v alpha:a];
 }
 
-NSColor *accent()  // Sounding notes.
+NSColor *rgb(CGFloat r, CGFloat g, CGFloat b)
 {
-  return [NSColor colorWithCalibratedRed:0.27 green:0.56 blue:0.96 alpha:1.0];
+  return [NSColor colorWithCalibratedRed:r green:g blue:b alpha:1.0];
 }
 
-NSColor *accentDark()
+NSColor *accent()  // Sounding notes in the plain zone; general UI accent.
 {
-  return [NSColor colorWithCalibratedRed:0.20 green:0.42 blue:0.80 alpha:1.0];
+  return rgb(0.27, 0.56, 0.96);
 }
 
-NSColor *rootAccent()  // The key that was actually pressed / the scale's root.
+// A key's zone: the control octave, else everything at or above the trigger start,
+// else the plain zone. The control zone wins where the two overlap.
+enum class Zone
 {
-  return [NSColor colorWithCalibratedRed:0.98 green:0.64 blue:0.24 alpha:1.0];
+  Normal,
+  Control,
+  Trigger
+};
+
+NSColor *zoneBase(Zone zone, bool white)  // Idle keys, tinted by zone.
+{
+  switch (zone)
+  {
+    case Zone::Control: return white ? rgb(0.80, 0.91, 0.83) : rgb(0.22, 0.38, 0.27);
+    case Zone::Trigger: return white ? rgb(0.98, 0.92, 0.77) : rgb(0.53, 0.41, 0.16);
+    default:            return gray(white ? 0.90 : 0.17);
+  }
 }
 
-NSColor *inScaleWhite()  // Notes of the selected scale, on white keys.
+NSColor *zoneActive(Zone zone)  // Chord notes, pressed or generated alike; the scale in
+                               // the control zone.
 {
-  return [NSColor colorWithCalibratedRed:0.78 green:0.88 blue:0.99 alpha:1.0];
-}
-
-NSColor *inScaleBlack()
-{
-  return [NSColor colorWithCalibratedRed:0.30 green:0.45 blue:0.68 alpha:1.0];
-}
-
-NSColor *chordGhostWhite()  // Notes of a held chord that are not sounding.
-{
-  return [NSColor colorWithCalibratedRed:0.70 green:0.79 blue:0.94 alpha:1.0];
-}
-
-NSColor *chordGhostBlack()
-{
-  return [NSColor colorWithCalibratedRed:0.24 green:0.33 blue:0.50 alpha:1.0];
+  switch (zone)
+  {
+    case Zone::Control: return rgb(0.19, 0.66, 0.38);
+    case Zone::Trigger: return rgb(0.94, 0.58, 0.14);
+    default:            return rgb(0.27, 0.56, 0.96);
+  }
 }
 
 void drawText(NSString *text, NSRect rect, CGFloat size, NSColor *color, NSTextAlignment align,
@@ -164,36 +169,6 @@ int whiteCount(int low, int high)
   for (int i = low; i <= high; ++i)
     if (isWhiteNote(i)) ++count;
   return count;
-}
-
-// Mirrors the geometry drawKeyboardInRect draws with. Black keys are tested first, since
-// they sit on top of the white ones.
-int keyAtPoint(NSPoint p, NSRect area, int low, int high)
-{
-  if (!NSPointInRect(p, area)) return -1;
-
-  const int whites = whiteCount(low, high);
-  if (whites <= 0) return -1;
-  const CGFloat ww = area.size.width / whites;
-  const CGFloat bw = ww * 0.62;
-  const CGFloat bh = area.size.height * 0.62;
-
-  for (int key = low; key <= high; ++key)
-  {
-    if (isWhiteNote(key)) continue;
-    const NSRect r = NSMakeRect(area.origin.x + whitesBefore(low, key) * ww - bw / 2,
-                                area.origin.y, bw, bh);
-    if (NSPointInRect(p, r)) return key;
-  }
-
-  for (int key = low; key <= high; ++key)
-  {
-    if (!isWhiteNote(key)) continue;
-    const NSRect r = NSMakeRect(area.origin.x + whitesBefore(low, key) * ww, area.origin.y,
-                                ww - 1.0, area.size.height);
-    if (NSPointInRect(p, r)) return key;
-  }
-  return -1;
 }
 
 const char *kNoteNames[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
@@ -350,53 +325,110 @@ Snapshot takeSnapshot(GuiState *state)
            selected ? NSFontWeightSemibold : NSFontWeightRegular);
 }
 
-// Draws one keyboard. `controlOctave` draws the held / in-scale / root highlighting;
-// `scaleInView` gates the scale tinting and the root, which only make sense while the
-// held control notes put a scale in force. The bed draws the chord ghost and the
-// sounding notes.
-- (void)drawKeyboardInRect:(NSRect)area
-                       low:(int)low
-                      high:(int)high
-             controlOctave:(BOOL)controlOctave
-               scaleInView:(BOOL)scaleInView
+// A borrow direction button: Prev / Next are drawn as arrows pointing their way, None
+// as a plain button.
+- (void)drawBorrowButton:(NSRect)r dir:(int)dir selected:(BOOL)selected
+{
+  if (dir == static_cast<int>(BorrowDir::None))
+  {
+    [self drawButton:r title:@"None" selected:selected inert:NO];
+    return;
+  }
+
+  const CGFloat tip = 12;
+  NSBezierPath *path = [NSBezierPath bezierPath];
+  if (dir == static_cast<int>(BorrowDir::Prev))
+  {
+    [path moveToPoint:NSMakePoint(r.origin.x + tip, r.origin.y)];
+    [path lineToPoint:NSMakePoint(NSMaxX(r), r.origin.y)];
+    [path lineToPoint:NSMakePoint(NSMaxX(r), NSMaxY(r))];
+    [path lineToPoint:NSMakePoint(r.origin.x + tip, NSMaxY(r))];
+    [path lineToPoint:NSMakePoint(r.origin.x, NSMidY(r))];
+  }
+  else
+  {
+    [path moveToPoint:NSMakePoint(r.origin.x, r.origin.y)];
+    [path lineToPoint:NSMakePoint(NSMaxX(r) - tip, r.origin.y)];
+    [path lineToPoint:NSMakePoint(NSMaxX(r), NSMidY(r))];
+    [path lineToPoint:NSMakePoint(NSMaxX(r) - tip, NSMaxY(r))];
+    [path lineToPoint:NSMakePoint(r.origin.x, NSMaxY(r))];
+  }
+  [path closePath];
+
+  NSColor *fill = selected ? accent() : gray(0.28);
+  [fill setFill];
+  [path fill];
+  [gray(0.10) setFill];
+  [path setLineWidth:1];
+  [path stroke];
+  drawText(dir == static_cast<int>(BorrowDir::Prev) ? @"Prev" : @"Next",
+           NSMakeRect(r.origin.x, NSMidY(r) - 7, r.size.width, 14), 10.5,
+           selected ? gray(1.0) : gray(0.72), NSTextAlignmentCenter,
+           selected ? NSFontWeightSemibold : NSFontWeightRegular);
+}
+
+// The fill for one key: pressed notes and generated chord notes read out alike in the
+// zone's active color; in the control zone the held notes and the scale itself share
+// that same highlight.
+- (NSColor *)fillForKey:(int)key zone:(Zone)zone
+{
+  const ScaleSelection sel =
+      decodeSelectionLocal(_state->selection.load(std::memory_order_relaxed));
+  const bool anyHeld =
+      (_state->heldControl[0].load(std::memory_order_relaxed) |
+       _state->heldControl[1].load(std::memory_order_relaxed)) != 0;
+
+  if (_state->isSounding(key) || _state->isChordNote(key)) return zoneActive(zone);
+
+  if (zone == Zone::Control &&
+      (_state->isControlHeld(key) || (anyHeld && inScale(key % 12, sel))))
+    return zoneActive(Zone::Control);
+
+  return zoneBase(zone, isWhiteNote(key));
+}
+
+// The horizontal span of a key range, in the keyboard's white-key geometry.
+NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
+{
+  const int whites = whiteCount(low, high);
+  const CGFloat ww = area.size.width / whites;
+  const CGFloat xStart = area.origin.x + std::min(whites, whitesBefore(low, lo)) * ww;
+  const CGFloat xEnd = area.origin.x + std::min(whites, whitesBefore(low, hi + 1)) * ww;
+  return NSMakeRect(xStart, 0, xEnd - xStart, 0);
+}
+
+// Draws the single 88-key board: the control and trigger zones are tinted, a colored
+// bar marks each zone's span along the top, and the active notes are highlighted per
+// zone.
+- (void)drawKeyboardInRect:(NSRect)area low:(int)low high:(int)high
 {
   const int whites = whiteCount(low, high);
   if (whites <= 0) return;
 
   const CGFloat ww = area.size.width / whites;
-  const int rootKey = _state->rootKey.load(std::memory_order_relaxed);
-  const ScaleSelection sel = decodeSelectionLocal(_state->selection.load(std::memory_order_relaxed));
+  const int controlRoot = _state->controlRoot.load(std::memory_order_relaxed);
+  const int triggerStart = _state->triggerStart.load(std::memory_order_relaxed);
+
+  auto zoneOfKey = [controlRoot, triggerStart](int key) -> Zone
+  {
+    if (key >= controlRoot && key <= controlRoot + 11) return Zone::Control;
+    if (key >= triggerStart) return Zone::Trigger;
+    return Zone::Normal;
+  };
 
   // White keys first; black keys are drawn over them.
   for (int key = low; key <= high; ++key)
   {
     if (!isWhiteNote(key)) continue;
 
-    const CGFloat x = area.origin.x + whitesBefore(low, key) * ww;
-    const NSRect r = NSMakeRect(x, area.origin.y, ww - 1.0, area.size.height);
-
-    NSColor *fill = gray(0.90);
-    if (!controlOctave && _state->isChordNote(key)) fill = chordGhostWhite();
-    if (controlOctave && scaleInView && inScale(key % 12, sel)) fill = inScaleWhite();
-    if (controlOctave && _state->isControlHeld(key)) fill = accent();
-    if (_state->isSounding(key)) fill = key == rootKey ? rootAccent() : accent();
-    if (controlOctave && scaleInView && key % 12 == sel.keyPc) fill = rootAccent();
-
+    const NSRect r =
+        NSMakeRect(area.origin.x + whitesBefore(low, key) * ww, area.origin.y, ww - 1.0,
+                   area.size.height);
+    NSColor *fill = [self fillForKey:key zone:zoneOfKey(key)];
     [fill setFill];
     NSRectFill(r);
     [gray(0.45) setFill];
     NSFrameRect(r);
-
-    if (controlOctave)
-    {
-      drawText(noteName(key), NSMakeRect(r.origin.x, NSMaxY(r) - 16, r.size.width, 13), 8.5,
-               gray(0.35), NSTextAlignmentCenter);
-    }
-    else if (key % 12 == 0)
-    {
-      drawText(noteName(key), NSMakeRect(r.origin.x, NSMaxY(r) - 16, r.size.width, 13), 8.5,
-               gray(0.45), NSTextAlignmentCenter);
-    }
   }
 
   const CGFloat bw = ww * 0.62;
@@ -406,26 +438,38 @@ Snapshot takeSnapshot(GuiState *state)
   {
     if (isWhiteNote(key)) continue;
 
-    const CGFloat x = area.origin.x + whitesBefore(low, key) * ww - bw / 2.0;
-    const NSRect r = NSMakeRect(x, area.origin.y, bw, bh);
-
-    NSColor *fill = gray(0.17);
-    if (!controlOctave && _state->isChordNote(key)) fill = chordGhostBlack();
-    if (controlOctave && scaleInView && inScale(key % 12, sel)) fill = inScaleBlack();
-    if (controlOctave && _state->isControlHeld(key)) fill = accentDark();
-    if (_state->isSounding(key)) fill = key == rootKey ? rootAccent() : accentDark();
-    if (controlOctave && scaleInView && key % 12 == sel.keyPc) fill = rootAccent();
-
+    const NSRect r = NSMakeRect(area.origin.x + whitesBefore(low, key) * ww - bw / 2.0,
+                                area.origin.y, bw, bh);
+    NSColor *fill = [self fillForKey:key zone:zoneOfKey(key)];
     [fill setFill];
     NSRectFill(r);
     [gray(0.05) setFill];
     NSFrameRect(r);
+  }
 
-    if (controlOctave)
+  // Zone bars along the top edge, so the zones read at a glance. The trigger bar is
+  // split where the control octave sits on top of it.
+  const int cLo = std::max(controlRoot, low);
+  const int cHi = std::min(controlRoot + 11, high);
+  if (cLo <= cHi)
+  {
+    NSRect span = zoneSpan(area, low, high, cLo, cHi);
+    [zoneActive(Zone::Control) setFill];
+    NSRectFill(NSMakeRect(span.origin.x, area.origin.y, span.size.width, 6));
+  }
+
+  if (triggerStart >= low && triggerStart <= high)
+  {
+    NSColor *bar = zoneActive(Zone::Trigger);
+    [bar setFill];
+    auto fillBar = [&](int lo, int hi)
     {
-      drawText(pitchName(key), NSMakeRect(r.origin.x - 4, NSMaxY(r) - 16, r.size.width + 8, 13),
-               9, gray(0.85), NSTextAlignmentCenter);
-    }
+      if (lo > hi) return;
+      NSRect span = zoneSpan(area, low, high, std::max(lo, low), std::min(hi, high));
+      NSRectFill(NSMakeRect(span.origin.x, area.origin.y, span.size.width, 6));
+    };
+    fillBar(std::max(triggerStart, low), cLo - 1);
+    fillBar(std::max(triggerStart, cHi + 1), high);
   }
 }
 
@@ -471,26 +515,17 @@ Snapshot takeSnapshot(GuiState *state)
   drawText(headline, NSMakeRect(kPad, 14, 420, 26), 20, holding ? gray(0.96) : gray(0.62),
            NSTextAlignmentLeft, NSFontWeightSemibold);
 
-  NSString *subline = [NSString stringWithFormat:@"Voicing: %s", voicingTypeName(voicing)];
-  if (rootKey >= 0)
-    subline =
-        [NSString stringWithFormat:@"Voicing: %s  ·  Top: %@ (MIDI %d)",
-                             voicingTypeName(voicing), noteName(rootKey), rootKey];
+  NSString *subline;
+  if (holding)
+    subline = [NSString stringWithFormat:@"Voicing: %s  ·  Top: %@ (MIDI %d)",
+                          voicingTypeName(voicing), noteName(rootKey), rootKey];
+  else
+    subline = @"";  // Nothing is sounding: the voicing / top readout goes quiet.
   drawText(subline, NSMakeRect(kPad, 42, 560, 18), 12, gray(0.62), NSTextAlignmentLeft);
 
   drawText(holding ? @"playing" : @"ready",
            NSMakeRect([self bounds].size.width - kPad - 200, 18, 200, 18), 11,
            holding ? accent() : gray(0.42), NSTextAlignmentRight);
-
-  // Scale family row: display only; the family is identified by the held control notes.
-  drawText(@"SCALE", NSMakeRect(kPad, kFamilyRowY + 9, kLabelWidth, 14), 9.5, gray(0.45),
-           NSTextAlignmentLeft, NSFontWeightSemibold);
-  for (int i = 0; i < static_cast<int>(ScaleFamily::Count); ++i)
-    [self drawButton:familyButtonRect(i, [self bounds].size.width)
-               title:[NSString stringWithUTF8String:scaleFamilyShortName(
-                          static_cast<ScaleFamily>(i))]
-            selected:anyHeld && i == static_cast<int>(sel.family)
-               inert:i != static_cast<int>(sel.family)];
 
   // Voicing row: the only selectable stacking right now.
   drawText(@"VOICING", NSMakeRect(kPad, kVoicingRowY + 9, kLabelWidth, 14), 9.5, gray(0.45),
@@ -513,49 +548,25 @@ Snapshot takeSnapshot(GuiState *state)
     drawText([NSString stringWithUTF8String:kBorrowRowLabels[row]],
              NSMakeRect(kPad, kRowY[row] + 9, kBorrowLabelWidth, 14), 9.5, gray(0.45),
              NSTextAlignmentLeft, NSFontWeightSemibold);
-    for (int i = 0; i < static_cast<int>(BorrowDir::Count); ++i)
-      [self drawButton:borrowButtonRect(row, i, [self bounds].size.width)
-                 title:[NSString stringWithUTF8String:borrowDirName(static_cast<BorrowDir>(i))]
-              selected:i == value
-                 inert:NO];
+    for (int slot = 0; slot < 3; ++slot)
+    {
+      const int dir = kBorrowDisplayOrder[slot];
+      [self drawBorrowButton:borrowButtonRect(row, slot, [self bounds].size.width)
+                         dir:dir
+                    selected:dir == value];
+    }
   }
 
-  // Chord keyboard.
-  drawText(@"GENERATED CHORD", NSMakeRect(kPad, kChordLabelY, 400, 14), 9.5, gray(0.45),
+  // Keyboard: the single 88-key board with the control and trigger zones tinted.
+  drawText(@"KEYBOARD", NSMakeRect(kPad, kKeyboardLabelY, 400, 14), 9.5, gray(0.45),
            NSTextAlignmentLeft, NSFontWeightSemibold);
   [self drawStepper:triggerStartStepperRect([self bounds].size.width)
               label:[NSString stringWithFormat:@"TRIGGER @ %@", noteName(_lastDrawn.triggerStart)]];
-  [self drawKeyboardInRect:NSMakeRect(kPad, kChordKeyboardY, [self bounds].size.width - 2 * kPad,
-                                     kChordKeyboardHeight)
-                       low:kBedLow
-                      high:kBedHigh
-             controlOctave:NO
-               scaleInView:NO];
-
-  // Control octave.
-  drawText([NSString stringWithFormat:@"CONTROL OCTAVE  (%@)", noteName(_lastDrawn.controlRoot)],
-           NSMakeRect(kPad, kControlLabelY, 400, 14), 9.5, gray(0.45), NSTextAlignmentLeft,
-           NSFontWeightSemibold);
   [self drawStepper:controlRootStepperRect([self bounds].size.width)
               label:[NSString stringWithFormat:@"CONTROL @ %@", noteName(_lastDrawn.controlRoot)]];
-  [self drawKeyboardInRect:controlKeyboardRect()
-                       low:_lastDrawn.controlRoot
-                      high:_lastDrawn.controlRoot + 11
-             controlOctave:YES
-               scaleInView:anyHeld];
-
-  // Legend, in explicit lines so it is never clipped.
-  const CGFloat lx = kPad + kControlKeyboardWidth + 26;
-  const CGFloat lw = [self bounds].size.width - lx - kPad;
-  const CGFloat ly = kControlKeyboardY + 2;
-  drawText(@"Held control notes identify the scale", NSMakeRect(lx, ly, lw, 14), 11,
-           gray(0.58), NSTextAlignmentLeft);
-  drawText(@"(6dim > m6dim > 7dim > 7♭5dim); trigger keys sound", NSMakeRect(lx, ly + 15, lw, 14), 11,
-           gray(0.58), NSTextAlignmentLeft);
-  drawText(@"the stack with the pressed note on top;", NSMakeRect(lx, ly + 30, lw, 14), 11,
-           gray(0.58), NSTextAlignmentLeft);
-  drawText(@"out-of-scale notes pass through.", NSMakeRect(lx, ly + 45, lw, 14), 11, gray(0.58),
-           NSTextAlignmentLeft);
+  [self drawKeyboardInRect:keyboardRect([self bounds].size.width)
+                       low:kKeyboardLow
+                      high:kKeyboardHigh];
 }
 
 // Steps a zone stepper: the left third moves it down, the right third up, the middle is
@@ -575,7 +586,7 @@ Snapshot takeSnapshot(GuiState *state)
   const NSPoint p = [self convertPoint:[event locationInWindow] fromView:nil];
   const CGFloat viewWidth = [self bounds].size.width;
 
-  // The voicing row and the borrow rows are clickable; the family row is a readout,
+  // The voicing row and the borrow rows are clickable; the scale itself is a readout,
   // since the held control notes decide it.
   {
     const int count = static_cast<int>(VoicingType::Count);
@@ -595,11 +606,11 @@ Snapshot takeSnapshot(GuiState *state)
                                                             GuiState::Request::BorrowSecond,
                                                             GuiState::Request::BorrowThird};
     for (int row = 0; row < 3; ++row)
-      for (int i = 0; i < static_cast<int>(BorrowDir::Count); ++i)
+      for (int slot = 0; slot < 3; ++slot)
       {
-        if (NSPointInRect(p, borrowButtonRect(row, i, viewWidth)))
+        if (NSPointInRect(p, borrowButtonRect(row, slot, viewWidth)))
         {
-          _state->request(kBorrowRowRequests[row], i);
+          _state->request(kBorrowRowRequests[row], kBorrowDisplayOrder[slot]);
           [self setNeedsDisplay:YES];
           return;
         }
@@ -698,25 +709,13 @@ ViewRect guiVoicingButtonRect(int index, double viewWidth)
 
 ViewRect guiBorrowButtonRect(int row, int index, double viewWidth)
 {
+  // The index is the borrow direction (None, Prev, Next); the display slots read
+  // Prev | None | Next.
   if (row < 0 || row > 2) return {};
-  const NSRect r = borrowButtonRect(row, index, viewWidth);
+  if (index < 0 || index >= static_cast<int>(BorrowDir::Count)) return {};
+  const int slot = index == 0 ? 1 : index;
+  const NSRect r = borrowButtonRect(row, slot, viewWidth);
   return {r.origin.x, r.origin.y, r.size.width, r.size.height};
-}
-
-ViewRect guiControlKeyRect(int key, int controlRoot)
-{
-  const NSRect area = controlKeyboardRect();
-  if (key < controlRoot || key > controlRoot + 11) return {};
-
-  const CGFloat ww = area.size.width / whiteCount(controlRoot, controlRoot + 11);
-
-  if (isWhiteNote(key))
-    return {area.origin.x + whitesBefore(controlRoot, key) * ww, area.origin.y, ww - 1.0,
-            area.size.height};
-
-  const CGFloat bw = ww * 0.62;
-  return {area.origin.x + whitesBefore(controlRoot, key) * ww - bw / 2, area.origin.y, bw,
-          area.size.height * 0.62};
 }
 
 void guiPreferredSize(const GuiState *state, uint32_t *width, uint32_t *height)

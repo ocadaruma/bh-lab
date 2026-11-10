@@ -543,6 +543,8 @@ void markForwarded(Bhl *rc, int16_t channel, int16_t key)
   if (key < 0 || key > 127) return;
   const int ch = channel < 0 ? 0 : (channel & 0xf);
   if (rc->forwarded[ch][key] < 255) ++rc->forwarded[ch][key];
+  // The GUI tracks forwarded notes as sounding, so pass-through presses read out too.
+  rc->gui.noteOn(key);
 }
 
 // Was this key forwarded on the way in? A channel of -1 matches any. Clears the mark.
@@ -555,6 +557,10 @@ bool takeForwarded(Bhl *rc, int16_t channel, int16_t key)
     if (channel >= 0 && ch != (channel & 0xf)) continue;
     if (rc->forwarded[ch][key] == 0) continue;
     --rc->forwarded[ch][key];
+    // Drop the GUI's sounding mark only when no channel still holds the note.
+    int total = 0;
+    for (int c2 = 0; c2 < 16; ++c2) total += rc->forwarded[c2][key];
+    if (total == 0) rc->gui.noteOff(key);
     return true;
   }
   return false;
