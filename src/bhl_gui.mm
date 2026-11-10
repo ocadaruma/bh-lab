@@ -336,22 +336,25 @@ Snapshot takeSnapshot(GuiState *state)
   }
 
   const CGFloat tip = 12;
+  // Inset by half the stroke width so the stroked edge lands exactly on the rect,
+  // like NSFrameRect does for the plain buttons.
+  const NSRect ir = NSInsetRect(r, 0.5, 0.5);
   NSBezierPath *path = [NSBezierPath bezierPath];
   if (dir == static_cast<int>(BorrowDir::Prev))
   {
-    [path moveToPoint:NSMakePoint(r.origin.x + tip, r.origin.y)];
-    [path lineToPoint:NSMakePoint(NSMaxX(r), r.origin.y)];
-    [path lineToPoint:NSMakePoint(NSMaxX(r), NSMaxY(r))];
-    [path lineToPoint:NSMakePoint(r.origin.x + tip, NSMaxY(r))];
-    [path lineToPoint:NSMakePoint(r.origin.x, NSMidY(r))];
+    [path moveToPoint:NSMakePoint(ir.origin.x + tip, ir.origin.y)];
+    [path lineToPoint:NSMakePoint(NSMaxX(ir), ir.origin.y)];
+    [path lineToPoint:NSMakePoint(NSMaxX(ir), NSMaxY(ir))];
+    [path lineToPoint:NSMakePoint(ir.origin.x + tip, NSMaxY(ir))];
+    [path lineToPoint:NSMakePoint(ir.origin.x, NSMidY(ir))];
   }
   else
   {
-    [path moveToPoint:NSMakePoint(r.origin.x, r.origin.y)];
-    [path lineToPoint:NSMakePoint(NSMaxX(r) - tip, r.origin.y)];
-    [path lineToPoint:NSMakePoint(NSMaxX(r), NSMidY(r))];
-    [path lineToPoint:NSMakePoint(NSMaxX(r) - tip, NSMaxY(r))];
-    [path lineToPoint:NSMakePoint(r.origin.x, NSMaxY(r))];
+    [path moveToPoint:NSMakePoint(ir.origin.x, ir.origin.y)];
+    [path lineToPoint:NSMakePoint(NSMaxX(ir) - tip, ir.origin.y)];
+    [path lineToPoint:NSMakePoint(NSMaxX(ir), NSMidY(ir))];
+    [path lineToPoint:NSMakePoint(NSMaxX(ir) - tip, NSMaxY(ir))];
+    [path lineToPoint:NSMakePoint(ir.origin.x, NSMaxY(ir))];
   }
   [path closePath];
 
