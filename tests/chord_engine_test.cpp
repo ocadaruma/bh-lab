@@ -300,6 +300,19 @@ int main()
   expectTrue("override: press not below the top",
              buildOverrideChord(c6, 0, 69, 71, VoicingType::Close).count == 0);
 
+  // When the top is borrowed from the previous chord, the un-borrowed top sits ABOVE
+  // the borrowed one: pressing it over the trigger key reverts the borrow too.
+  // Degree 2 of C6 is E G A C; with the top borrowed prev its top is B, so B4
+  // triggers E4 G4 A4 B4 and pressing C5 over it reverts to E4 G4 A4 C5.
+  expectChord("override above the top: C5 over B4 on degree 2",
+              buildOverrideChord(c6, 2, 71, 72, VoicingType::Close),
+              (const int[]){64, 67, 69, 72}, 4);
+  expectTrue("override: press at the trigger key reverts nothing",
+             buildOverrideChord(c6, 2, 71, 71, VoicingType::Close).count == 0);
+  // A middle un-borrowed voice above the trigger key is not a cancel note.
+  expectTrue("override: middle voice above the top reverts nothing",
+             buildOverrideChord(c6, 2, 71, 79, VoicingType::Close).count == 0);
+
   if (failures)
   {
     printf("\n%d test(s) failed\n", failures);

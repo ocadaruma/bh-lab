@@ -138,10 +138,12 @@ Chord buildDegreeChord(const ScaleSelection &sel, int degree, int topKey, Voicin
 // The un-borrowed form of a held chord: the degree's root-position stack with the
 // borrowed voices swapped back to their un-borrowed counterparts in place. `triggerKey`
 // is the chord's top as it was triggered (its pitch class is the borrowed top's) and
-// `pressKey` is an un-borrowed top-three note of the degree, below the top, that the
-// user pressed. The pressed note sounds at its own key; it takes the top when it is
-// the un-borrowed top note, otherwise the top stays put and the borrowed top lands
-// one scale degree away from where the borrowed form had it.
+// `pressKey` is an un-borrowed top-three note of the degree that the user pressed.
+// The pressed note sounds at its own key; it takes the top when it is the un-borrowed
+// top note -- which sits below the borrowed top when the top is borrowed from the
+// next chord, above it when borrowed from the previous one -- otherwise the top
+// stays put and the borrowed top lands one scale degree away from where the borrowed
+// form had it.
 Chord buildOverrideChord(const ScaleSelection &sel, int degree, int triggerKey, int pressKey,
                          VoicingType voicing);
 

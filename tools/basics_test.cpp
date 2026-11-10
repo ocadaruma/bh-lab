@@ -570,8 +570,8 @@ int main()
            describe(first));
   }
 
-  // Pressing the cancel note again re-enters the un-borrowed form; the shared notes are
-  // not re-triggered.
+  // The session's single revert is spent: pressing the cancel note again passes
+  // through rather than re-entering the un-borrowed form.
   g_emitted.clear();
   {
     InputEvents press;
@@ -580,9 +580,9 @@ int main()
   }
   {
     const std::vector<Emitted> first = g_emitted;
-    const bool reEntered = first.size() == 2 && first[0].on && first[1].on &&
-                           first[0].key == 67 && first[1].key == 69;
-    expect("pressing A4 again sounds G4 A4 only", reEntered, describe(first));
+    const bool passed = first.size() == 1 && first[0].on && first[0].key == 69;
+    expect("pressing A4 again passes through (the revert is used up)", passed,
+           describe(first));
   }
   g_emitted.clear();
   {
@@ -591,10 +591,9 @@ int main()
     timeline.run(&release);
   }
   {
-    int ons = 0;
-    for (const auto &e : g_emitted)
-      if (e.on) ++ons;
-    expect("releasing A4 again sounds no notes either", ons == 0, describe(g_emitted));
+    const std::vector<Emitted> first = g_emitted;
+    const bool passed = first.size() == 1 && !first[0].on && first[0].key == 69;
+    expect("the pass-through note-off passes through too", passed, describe(first));
   }
 
   // Releasing the trigger key stops whatever the chord still sounds.
@@ -860,6 +859,88 @@ int main()
     for (const auto &e : g_emitted)
       if (!e.on) ++offs;
     expect("releasing E4 stops the whole chord", offs == 4, describe(g_emitted));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 48, 0.0);
+    timeline.run(&release);
+  }
+  expect("the control release is silent", g_emitted.empty(), describe(g_emitted));
+
+  // --- borrowing: with the top borrowed from the previous, revert comes from above --
+  // Borrow the top from the previous: degree 2's stack E G A C becomes E G A B, so B4
+  // sounds E4 G4 A4 B4. The un-borrowed top (C) now sits ABOVE the borrowed one: the
+  // only way to revert the chord is to press it over the trigger key.
+  reset(plugin, &timeline);
+  {
+    InputEvents setup;
+    setup.addParam(kBorrowTop, 1);  // Prev
+    timeline.run(&setup);
+  }
+  holdControl(&timeline, {48});
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 71, 0.8);  // B4
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool borrowed = first.size() == 4 && first[0].key == 64 && first[1].key == 67 &&
+                          first[2].key == 69 && first[3].key == 71;
+    expect("top borrowed prev: B4 sounds E4 G4 A4 B4", borrowed, describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 72, 0.8);  // C5, the un-borrowed top, above B4
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool reverted = first.size() == 2 && !first[0].on && first[0].key == 71 &&
+                          first[1].on && first[1].key == 72;
+    expect("pressing C5 over B4 reverts the chord in place (B4 off, C5 on)", reverted,
+           describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 72, 0.0);
+    timeline.run(&release);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool silent = first.size() == 1 && !first[0].on && first[0].key == 72;
+    expect("releasing C5 sounds no notes (B4 stays silent)", silent, describe(first));
+  }
+  // The revert is used up: pressing C5 again passes through, and releasing B4 stops
+  // whatever the chord still sounds.
+  g_emitted.clear();
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 72, 0.8);
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool passed = first.size() == 1 && first[0].on && first[0].key == 72;
+    expect("pressing C5 again passes through (the revert is used up)", passed,
+           describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 72, 0.0);
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 71, 0.0);
+    timeline.run(&release);
+  }
+  {
+    int offs = 0;
+    for (const auto &e : g_emitted)
+      if (!e.on) ++offs;
+    expect("the pass-through off plus releasing B4 stops E4 G4 A4 (4 offs)", offs == 4,
+           describe(g_emitted));
   }
   g_emitted.clear();
   {

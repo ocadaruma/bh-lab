@@ -365,7 +365,6 @@ Chord buildOverrideChord(const ScaleSelection &sel, int degree, int triggerKey, 
   if (!inRange(f, static_cast<int>(ScaleFamily::Count))) return chord;
   if (!inRange(degree, kScaleNoteCount)) return chord;
   if (triggerKey < 0 || triggerKey > 127 || pressKey < 0 || pressKey > 127) return chord;
-  if (pressKey >= triggerKey) return chord;
 
   int u[kStackedChordNotes];
   rootPositionStack(kFamilies[f], sel.keyPc, degree, u);
@@ -384,7 +383,9 @@ Chord buildOverrideChord(const ScaleSelection &sel, int degree, int triggerKey, 
   if (pressedSlot == kStackedChordNotes - 1)
   {
     // The pressed note is the un-borrowed top: it takes the top, the rest sit
-    // strictly below it.
+    // strictly below it. The un-borrowed top sits below the borrowed top when the top
+    // is borrowed from the next chord, above it when borrowed from the previous one;
+    // the stacking is the same either way.
     voices[count++] = pressKey;
     for (int j = 0; j < kStackedChordNotes - 1; ++j)
     {
@@ -393,7 +394,7 @@ Chord buildOverrideChord(const ScaleSelection &sel, int degree, int triggerKey, 
       voices[count++] = key;
     }
   }
-  else if (pressedSlot > 0)
+  else if (pressedSlot > 0 && pressKey < triggerKey)
   {
     // The top stays where it was; the pressed note sits at its own key, and the other
     // slots land where the same stack would with the top class on top. The un-borrowed
