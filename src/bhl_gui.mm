@@ -361,7 +361,9 @@ Snapshot takeSnapshot(GuiState *state)
   NSColor *fill = selected ? accent() : gray(0.28);
   [fill setFill];
   [path fill];
-  [gray(0.10) setFill];
+  // NB: after attributed text drawing the context's stroke color is left as the text
+  // color, so set the stroke explicitly rather than relying on the fill.
+  [gray(0.10) setStroke];
   [path setLineWidth:1];
   [path stroke];
   drawText(dir == static_cast<int>(BorrowDir::Prev) ? @"Prev" : @"Next",
