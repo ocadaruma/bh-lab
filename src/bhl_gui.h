@@ -196,8 +196,8 @@ ViewRect guiVoicingButtonRect(int index, double viewWidth);
 // the index is the borrow direction (None, Prev, Next).
 ViewRect guiBorrowButtonRect(int row, int index, double viewWidth);
 
-// Test support: the contrary motion toggle, 0 = Off, 1 = On.
-ViewRect guiContraryButtonRect(int index, double viewWidth);
+// Test support: the contrary motion toggle.
+ViewRect guiContraryToggleRect(double viewWidth);
 
 // Platform view lifecycle. The returned handle is an NSView* on macOS.
 void *guiCreate(GuiState *state);

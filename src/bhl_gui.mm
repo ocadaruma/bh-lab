@@ -64,14 +64,15 @@ NSRect borrowButtonRect(int row, int index, CGFloat viewWidth)
   return NSMakeRect(x0 + index * (w + kButtonGap), kRowY[row], w, kRowHeight);
 }
 
-// The contrary motion row: a plain Off | On toggle, off by default.
-NSRect contraryButtonRect(int index, CGFloat viewWidth)
+// The contrary motion row: a single toggle switch, off by default.
+constexpr CGFloat kToggleWidth = 92;
+constexpr CGFloat kToggleHeight = 22;
+
+NSRect contraryToggleRect(CGFloat viewWidth)
 {
   const CGFloat x0 = kPad + kLabelWidth + 6;
-  const CGFloat total = viewWidth - kPad - x0;
-  const int count = 2;
-  const CGFloat w = (total - kButtonGap * (count - 1)) / count;
-  return NSMakeRect(x0 + index * (w + kButtonGap), kContraryRowY, w, kRowHeight);
+  return NSMakeRect(x0, kContraryRowY + (kRowHeight - kToggleHeight) / 2, kToggleWidth,
+                    kToggleHeight);
 }
 
 // The borrow buttons read Prev | None | Next, left to right.
@@ -578,14 +579,40 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
     }
   }
 
-  // Contrary motion row: an on/off switch.
+  // Contrary motion row: a single on/off toggle switch.
   drawText(@"CONTRARY", NSMakeRect(kPad, kContraryRowY + 9, kLabelWidth, 14), 9.5,
            gray(0.45), NSTextAlignmentLeft, NSFontWeightSemibold);
-  for (int i = 0; i < 2; ++i)
-    [self drawButton:contraryButtonRect(i, [self bounds].size.width)
-               title:i == 1 ? @"On" : @"Off"
-            selected:i == _lastDrawn.contraryMotion
-               inert:NO];
+  {
+    const NSRect r = contraryToggleRect([self bounds].size.width);
+    const bool on = _lastDrawn.contraryMotion != 0;
+
+    NSBezierPath *track =
+        [NSBezierPath bezierPathWithRoundedRect:r xRadius:r.size.height / 2
+                                          yRadius:r.size.height / 2];
+    // NB: after attributed text drawing the context's stroke color is left as the
+    // text color, so set the stroke explicitly rather than relying on the fill.
+    [on ? accent() : gray(0.30) setFill];
+    [track fill];
+    [gray(0.10) setStroke];
+    [track setLineWidth:1];
+    [track stroke];
+
+    const CGFloat d = r.size.height - 4;  // The knob's diameter.
+    const CGFloat kx = on ? NSMaxX(r) - d - 2 : r.origin.x + 2;
+    NSBezierPath *knob =
+        [NSBezierPath bezierPathWithOvalInRect:NSMakeRect(kx, r.origin.y + 2, d, d)];
+    [gray(on ? 1.0 : 0.85) setFill];
+    [knob fill];
+
+    // A small readout in the space the knob vacates.
+    const CGFloat freeW = r.size.width - (d + 4);
+    if (on)
+      drawText(@"Off", NSMakeRect(r.origin.x + 2, NSMidY(r) - 7, freeW, 14), 9.5, gray(0.62),
+               NSTextAlignmentCenter);
+    else
+      drawText(@"On", NSMakeRect(r.origin.x + d + 2, NSMidY(r) - 7, freeW, 14), 9.5,
+               gray(0.72), NSTextAlignmentCenter);
+  }
 
   // Keyboard: the single 88-key board with the control and trigger zones tinted.
   drawText(@"KEYBOARD", NSMakeRect(kPad, kKeyboardLabelY, 400, 14), 9.5, gray(0.45),
@@ -648,14 +675,13 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
   }
 
   {
-    for (int i = 0; i < 2; ++i)
+    const NSRect r = contraryToggleRect(viewWidth);
+    if (NSPointInRect(p, r))
     {
-      if (NSPointInRect(p, contraryButtonRect(i, viewWidth)))
-      {
-        _state->request(GuiState::Request::ContraryMotion, i);
-        [self setNeedsDisplay:YES];
-        return;
-      }
+      const int current = _state->contraryMotion.load(std::memory_order_relaxed);
+      _state->request(GuiState::Request::ContraryMotion, current ? 0 : 1);
+      [self setNeedsDisplay:YES];
+      return;
     }
   }
 
@@ -760,10 +786,9 @@ ViewRect guiBorrowButtonRect(int row, int index, double viewWidth)
   return {r.origin.x, r.origin.y, r.size.width, r.size.height};
 }
 
-ViewRect guiContraryButtonRect(int index, double viewWidth)
+ViewRect guiContraryToggleRect(double viewWidth)
 {
-  if (index < 0 || index > 1) return {};
-  const NSRect r = contraryButtonRect(index, viewWidth);
+  const NSRect r = contraryToggleRect(viewWidth);
   return {r.origin.x, r.origin.y, r.size.width, r.size.height};
 }
 
