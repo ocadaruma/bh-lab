@@ -19,10 +19,7 @@ constexpr double kSampleRate = 48000.0;
 constexpr uint32_t kBlock = 512;
 constexpr double kTempo = 120.0;
 
-const void *CLAP_ABI hostGetExtension(const clap_host_t *, const char *)
-{
-  return nullptr;
-}
+const void *CLAP_ABI hostGetExtension(const clap_host_t *, const char *id);
 void CLAP_ABI hostRequestRestart(const clap_host_t *) {}
 void CLAP_ABI hostRequestProcess(const clap_host_t *) {}
 void CLAP_ABI hostRequestCallback(const clap_host_t *) {}
@@ -31,6 +28,10 @@ clap_host_t g_host = {CLAP_VERSION,     nullptr,            "basics-test",
                       "bh-lab",         "",                 "0.0.1",
                       hostGetExtension, hostRequestRestart, hostRequestProcess,
                       hostRequestCallback};
+
+// The plugin under test, set by makePlugin: the host's request_flush runs its flush
+// immediately, the way a real host would on its audio thread.
+inline const clap_plugin_t *g_plugin = nullptr;
 
 // --- event plumbing ---------------------------------------------------------
 
@@ -112,6 +113,30 @@ bool CLAP_ABI collectEvent(const clap_output_events_t *, const clap_event_header
   g_emitted.push_back({g_blockStart + header->time, note->key,
                        header->type == CLAP_EVENT_NOTE_ON, note->velocity});
   return true;
+}
+
+// Host-side params extension. request_flush runs the plugin's flush synchronously, so
+// the plugin's GUI request queue is drained between blocks -- in this host everything
+// happens on one thread, so the direct call is safe.
+void hostParamsRescan(const clap_host_t *, clap_id, clap_param_clear_flags) {}
+void hostParamsRequestFlush(const clap_host_t *host)
+{
+  (void)host;
+  if (!g_plugin) return;
+  const auto *params = static_cast<const clap_plugin_params_t *>(
+      g_plugin->get_extension(g_plugin, CLAP_EXT_PARAMS));
+  if (!params || !params->flush) return;
+  InputEvents in;
+  in.seal();
+  clap_output_events_t out = {nullptr, collectEvent};
+  params->flush(g_plugin, &in.api, &out);
+}
+const clap_host_params_t kHostParams = {nullptr, hostParamsRescan, hostParamsRequestFlush};
+
+const void *CLAP_ABI hostGetExtension(const clap_host_t *, const char *id)
+{
+  if (strcmp(id, CLAP_EXT_PARAMS)) return nullptr;
+  return &kHostParams;
 }
 
 // --- the harness ------------------------------------------------------------
@@ -206,6 +231,7 @@ inline const clap_plugin_t *makePlugin()
   plugin->init(plugin);
   plugin->activate(plugin, kSampleRate, 1, kBlock);
   plugin->start_processing(plugin);
+  g_plugin = plugin;
   return plugin;
 }
 
