@@ -27,6 +27,13 @@ struct GuiState
   std::atomic<int> contraryMotion = {0};
   std::atomic<int> controlRoot = {48};
   std::atomic<int> triggerStart = {60};
+  // The note-velocity percentages (0..2) relative to the trigger note's velocity,
+  // for the four chord notes (low to high) and the contrary note.
+  std::atomic<double> velBottom = {1};
+  std::atomic<double> velSecond = {1};
+  std::atomic<double> velThird = {1};
+  std::atomic<double> velTop = {1};
+  std::atomic<double> velContrary = {1};
 
   // Clicks are handed to the audio thread, which turns them into real parameter changes
   // the host can record. A small queue rather than a single slot, so two quick clicks
@@ -40,7 +47,12 @@ struct GuiState
     BorrowTop,
     BorrowSecond,
     BorrowThird,
-    ContraryMotion
+    ContraryMotion,
+    VelBottom,
+    VelSecond,
+    VelThird,
+    VelTop,
+    VelContrary
   };
 
   struct PendingRequest
@@ -87,6 +99,21 @@ struct GuiState
         break;
       case Request::ContraryMotion:
         contraryMotion.store(static_cast<int>(value), std::memory_order_relaxed);
+        break;
+      case Request::VelBottom:
+        velBottom.store(value, std::memory_order_relaxed);
+        break;
+      case Request::VelSecond:
+        velSecond.store(value, std::memory_order_relaxed);
+        break;
+      case Request::VelThird:
+        velThird.store(value, std::memory_order_relaxed);
+        break;
+      case Request::VelTop:
+        velTop.store(value, std::memory_order_relaxed);
+        break;
+      case Request::VelContrary:
+        velContrary.store(value, std::memory_order_relaxed);
         break;
       case Request::ControlRoot:
         controlRoot.store(static_cast<int>(value), std::memory_order_relaxed);
@@ -198,6 +225,10 @@ ViewRect guiBorrowButtonRect(int row, int index, double viewWidth);
 
 // Test support: the contrary motion toggle.
 ViewRect guiContraryToggleRect(double viewWidth);
+
+// Test support: a velocity stepper, by its index (0 bottom, 1 second, 2 third, 3 top,
+// 4 contrary note).
+ViewRect guiVelStepperRect(int index, double viewWidth);
 
 // Platform view lifecycle. The returned handle is an NSView* on macOS.
 void *guiCreate(GuiState *state);

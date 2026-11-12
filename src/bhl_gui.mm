@@ -8,6 +8,8 @@
 #import <Cocoa/Cocoa.h>
 
 #include <algorithm>
+#include <cmath>
+#include <cstdlib>
 
 #include "bhl_gui.h"
 #include "chord_engine.h"
@@ -18,7 +20,7 @@ namespace
 {
 
 constexpr uint32_t kViewWidth = 810;
-constexpr uint32_t kViewHeight = 358;
+constexpr uint32_t kViewHeight = 394;
 
 // The keyboard is a full 88-key board (A0..G8), covering every zone with room either
 // side.
@@ -37,12 +39,13 @@ constexpr CGFloat kBorrowTopRowY = 108;
 constexpr CGFloat kBorrowSecondRowY = 144;
 constexpr CGFloat kBorrowThirdRowY = 180;
 constexpr CGFloat kContraryRowY = 216;
+constexpr CGFloat kVelocityRowY = 252;
 constexpr CGFloat kRowHeight = 30;
 
 // The keyboard sits a gap below the stacking rows: it controls the zones, which is a
 // different role than the voicing / borrow picks above.
-constexpr CGFloat kKeyboardLabelY = 252;
-constexpr CGFloat kKeyboardY = 268;
+constexpr CGFloat kKeyboardLabelY = 288;
+constexpr CGFloat kKeyboardY = 304;
 constexpr CGFloat kKeyboardHeight = 72;
 
 NSRect voicingButtonRect(int index, CGFloat viewWidth)
@@ -67,6 +70,27 @@ NSRect borrowButtonRect(int row, int index, CGFloat viewWidth)
 // The contrary motion row: a single toggle switch, off by default.
 constexpr CGFloat kToggleWidth = 92;
 constexpr CGFloat kToggleHeight = 22;
+
+// The velocity row: one percentage stepper per generated note of one trigger --
+// the contrary note first, then the four chord notes low to high.
+constexpr int kVelStepperCount = kStackedChordNotes + 1;
+constexpr CGFloat kVelStepperHeight = 24;
+
+// The note indices behind the five steppers: 0 bottom, 1 second, 2 third, 3 top,
+// 4 contrary note (the same order as the parameters). The slots read left to right
+// with the contrary note first.
+const char *kVelNames[kVelStepperCount] = {"BOTTOM", "2ND", "3RD", "TOP", "CONTR."};
+const int kVelDisplayOrder[kVelStepperCount] = {4, 0, 1, 2, 3};
+
+NSRect velStepperRect(int index, CGFloat viewWidth)
+{
+  const CGFloat x0 = kPad + kLabelWidth + 6;
+  const CGFloat total = viewWidth - kPad - x0;
+  const CGFloat w = (total - kButtonGap * (kVelStepperCount - 1)) / kVelStepperCount;
+  return NSMakeRect(x0 + index * (w + kButtonGap),
+                    kVelocityRowY + (kRowHeight - kVelStepperHeight) / 2, w,
+                    kVelStepperHeight);
+}
 
 NSRect contraryToggleRect(CGFloat viewWidth)
 {
@@ -213,6 +237,32 @@ ScaleSelection decodeSelectionLocal(int encoded)
   return {static_cast<ScaleFamily>(encoded / 12), encoded % 12};
 }
 
+// The velocity atomic behind a stepper index (0 bottom, 1 second, 2 third, 3 top,
+// 4 contrary), so the row's code can treat the five values uniformly.
+const std::atomic<double> *velValue(GuiState *state, int index)
+{
+  switch (index)
+  {
+    case 0: return &state->velBottom;
+    case 1: return &state->velSecond;
+    case 2: return &state->velThird;
+    case 3: return &state->velTop;
+    default: return &state->velContrary;
+  }
+}
+
+GuiState::Request velRequest(int index)
+{
+  switch (index)
+  {
+    case 0: return GuiState::Request::VelBottom;
+    case 1: return GuiState::Request::VelSecond;
+    case 2: return GuiState::Request::VelThird;
+    case 3: return GuiState::Request::VelTop;
+    default: return GuiState::Request::VelContrary;
+  }
+}
+
 // What the UI last drew, so the timer can skip redundant redraws.
 struct Snapshot
 {
@@ -228,6 +278,7 @@ struct Snapshot
   int contraryMotion = -1;
   int controlRoot = -1;
   int triggerStart = -1;
+  double vel[kVelStepperCount] = {};
 
   bool operator==(const Snapshot &o) const
   {
@@ -239,7 +290,9 @@ struct Snapshot
            borrowSecond == o.borrowSecond && borrowThird == o.borrowThird &&
            contraryMotion == o.contraryMotion &&
            controlRoot == o.controlRoot &&
-           triggerStart == o.triggerStart;
+           triggerStart == o.triggerStart &&
+           vel[0] == o.vel[0] && vel[1] == o.vel[1] && vel[2] == o.vel[2] &&
+           vel[3] == o.vel[3] && vel[4] == o.vel[4];
   }
 };
 
@@ -261,19 +314,28 @@ Snapshot takeSnapshot(GuiState *state)
   s.contraryMotion = state->contraryMotion.load(std::memory_order_relaxed);
   s.controlRoot = state->controlRoot.load(std::memory_order_relaxed);
   s.triggerStart = state->triggerStart.load(std::memory_order_relaxed);
+  s.vel[0] = state->velBottom.load(std::memory_order_relaxed);
+  s.vel[1] = state->velSecond.load(std::memory_order_relaxed);
+  s.vel[2] = state->velThird.load(std::memory_order_relaxed);
+  s.vel[3] = state->velTop.load(std::memory_order_relaxed);
+  s.vel[4] = state->velContrary.load(std::memory_order_relaxed);
   return s;
 }
 
 }  // namespace
 
-@interface BhlView : NSView
+@interface BhlView : NSView <NSTextFieldDelegate>
 {
   bhl::GuiState *_state;
   NSTimer *_timer;
   Snapshot _lastDrawn;
+  NSTextField *_velField;  // The inline editor over a velocity stepper, nil when not editing.
+  int _velFieldIndex;
 }
 - (id)initWithState:(bhl::GuiState *)state;
 - (void)stopTimer;
+- (void)beginVelEdit:(int)index;
+- (void)endVelEdit;
 @end
 
 @implementation BhlView
@@ -306,9 +368,56 @@ Snapshot takeSnapshot(GuiState *state)
   }
 }
 
+// Dismounts the inline editor. The typed text is a percentage of the trigger note's
+// velocity (a trailing "%" is fine); anything unparseable is ignored and the current
+// value stands.
+- (void)endVelEdit
+{
+  if (!_velField) return;
+
+  const char *cstr = [_velField stringValue].UTF8String;
+  char *end = nullptr;
+  const double raw = cstr ? strtod(cstr, &end) : -1.0;
+  if (cstr && end != cstr && raw >= 0.0)
+    _state->request(velRequest(_velFieldIndex), raw / 100.0);
+
+  [_velField removeFromSuperview];
+  [_velField release];
+  _velField = nil;
+  _velFieldIndex = -1;
+  [self setNeedsDisplay:YES];
+}
+
+// Puts an inline editor over a velocity stepper, pre-filled with the current
+// percentage, so a value can be typed directly. Return -- or a click elsewhere, which
+// ends the edit -- commits it.
+- (void)beginVelEdit:(int)index
+{
+  if (_velField) return;
+  _velFieldIndex = index;
+
+  const NSRect r = NSInsetRect(velStepperRect(index, [self bounds].size.width), 1, 1);
+  _velField = [[NSTextField alloc] initWithFrame:r];
+  [_velField setAlignment:NSTextAlignmentCenter];
+  [_velField setFont:[NSFont systemFontOfSize:9.5 weight:NSFontWeightSemibold]];
+  [_velField setDelegate:self];
+  [_velField setStringValue:[NSString stringWithFormat:@"%.0f",
+                             velValue(_state, index)->load(std::memory_order_relaxed) *
+                                 100.0]];
+  [self addSubview:_velField];
+  if ([self window]) [[self window] makeFirstResponder:_velField];
+  [_velField selectText:nil];
+}
+
 - (void)dealloc
 {
   [self stopTimer];
+  if (_velField)
+  {
+    [_velField removeFromSuperview];
+    [_velField release];
+    _velField = nil;
+  }
   [super dealloc];
 }
 
@@ -614,6 +723,21 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
                gray(0.72), NSTextAlignmentCenter);
   }
 
+  // Velocity row: the percentage of the trigger note's velocity for each note one
+  // trigger generates -- the contrary note first, then the chord notes low to high.
+  drawText(@"VELOCITY", NSMakeRect(kPad, kVelocityRowY + 9, kLabelWidth, 14), 9.5,
+           gray(0.45), NSTextAlignmentLeft, NSFontWeightSemibold);
+  {
+    for (int slot = 0; slot < kVelStepperCount; ++slot)
+    {
+      const int i = kVelDisplayOrder[slot];
+      const NSString *label = [NSString stringWithFormat:@"%@ %.0f%%",
+                               [NSString stringWithUTF8String:kVelNames[i]],
+                               _lastDrawn.vel[i] * 100.0];
+      [self drawStepper:velStepperRect(slot, [self bounds].size.width) label:(NSString *)label];
+    }
+  }
+
   // Keyboard: the single 88-key board with the control and trigger zones tinted.
   drawText(@"KEYBOARD", NSMakeRect(kPad, kKeyboardLabelY, 400, 14), 9.5, gray(0.45),
            NSTextAlignmentLeft, NSFontWeightSemibold);
@@ -638,10 +762,21 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
   return current;
 }
 
+// Return -- and a click away, which ends the field's edit -- commit the typed value.
+- (void)controlTextDidEndEditing:(NSControl *)control
+{
+  (void)control;
+  [self endVelEdit];
+}
+
 - (void)mouseDown:(NSEvent *)event
 {
   const NSPoint p = [self convertPoint:[event locationInWindow] fromView:nil];
   const CGFloat viewWidth = [self bounds].size.width;
+
+  // If the inline editor is up and the click lands outside it, end the edit first:
+  // the click away commits the typed value, then the click itself is handled as usual.
+  if (_velField && !NSPointInRect(p, [_velField frame])) [self endVelEdit];
 
   // The voicing row and the borrow rows are clickable; the scale itself is a readout,
   // since the held control notes decide it.
@@ -680,6 +815,36 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
     {
       const int current = _state->contraryMotion.load(std::memory_order_relaxed);
       _state->request(GuiState::Request::ContraryMotion, current ? 0 : 1);
+      [self setNeedsDisplay:YES];
+      return;
+    }
+  }
+
+  {
+    for (int slot = 0; slot < kVelStepperCount; ++slot)
+    {
+      const int i = kVelDisplayOrder[slot];
+      const NSRect r = velStepperRect(slot, viewWidth);
+      if (!NSPointInRect(p, r)) continue;
+
+      // The left third steps down 5%, the right third up, the middle is the readout --
+      // and takes direct number input: click it to type the percentage.
+      const double current = velValue(_state, i)->load(std::memory_order_relaxed);
+      const double third = r.size.width / 3;
+      if (p.x >= r.origin.x + third && p.x <= NSMaxX(r) - third)
+      {
+        [self beginVelEdit:i];
+        return;
+      }
+      double next = current;
+      if (p.x < r.origin.x + third) next = current - 0.05;
+      if (p.x > NSMaxX(r) - third) next = current + 0.05;
+
+      // Snap to the step and stay on the parameter's 0..2 range.
+      next = std::round(next / 0.05) * 0.05;
+      if (next < 0.0) next = 0.0;
+      if (next > 2.0) next = 2.0;
+      _state->request(velRequest(i), next);
       [self setNeedsDisplay:YES];
       return;
     }
@@ -789,6 +954,17 @@ ViewRect guiBorrowButtonRect(int row, int index, double viewWidth)
 ViewRect guiContraryToggleRect(double viewWidth)
 {
   const NSRect r = contraryToggleRect(viewWidth);
+  return {r.origin.x, r.origin.y, r.size.width, r.size.height};
+}
+
+ViewRect guiVelStepperRect(int index, double viewWidth)
+{
+  // The index is the note (0 bottom, 1 second, 2 third, 3 top, 4 contrary), not the
+  // display slot: the slots read CONTR. | BOTTOM | 2ND | 3RD | TOP.
+  if (index < 0 || index >= kVelStepperCount) return {};
+  int slot = 0;
+  while (slot < kVelStepperCount && kVelDisplayOrder[slot] != index) ++slot;
+  const NSRect r = velStepperRect(slot, viewWidth);
   return {r.origin.x, r.origin.y, r.size.width, r.size.height};
 }
 

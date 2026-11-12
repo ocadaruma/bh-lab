@@ -66,6 +66,11 @@ enum ParamId : clap_id
   kParamBorrowSecond = 4,
   kParamBorrowThird = 5,
   kParamContraryMotion = 6,
+  kParamVelBottom = 7,
+  kParamVelSecond = 8,
+  kParamVelThird = 9,
+  kParamVelTop = 10,
+  kParamVelContrary = 11,
   kNumParams
 };
 
@@ -90,6 +95,14 @@ const ParamDef kParamDefs[kNumParams] = {
     {kParamBorrowThird, "Borrow 3rd", 0, static_cast<double>(BorrowDir::Count) - 1, 0,
      true},
     {kParamContraryMotion, "Contrary Motion", 0, 1, 0, true},
+    // Note-velocity percentages, relative to the pressed (trigger) note's velocity.
+    // 1.0 is 100%; above 1.0 amplifies (the result is clamped to CLAP's 0..1 range).
+    // The four chord parameters follow the generated notes, sorted low to high.
+    {kParamVelBottom, "Velocity Bottom", 0, 2, 1, false},
+    {kParamVelSecond, "Velocity 2nd", 0, 2, 1, false},
+    {kParamVelThird, "Velocity 3rd", 0, 2, 1, false},
+    {kParamVelTop, "Velocity Top", 0, 2, 1, false},
+    {kParamVelContrary, "Velocity Contrary", 0, 2, 1, false},
 };
 
 static_assert(sizeof(kParamDefs) / sizeof(kParamDefs[0]) == kNumParams,
@@ -101,8 +114,15 @@ static_assert(sizeof(kParamDefs) / sizeof(kParamDefs[0]) == kNumParams,
 // quality feature and are not reused.
 static_assert(kParamVoicing == 0 && kParamControlRoot == 1 && kParamTriggerStart == 2 &&
                   kParamBorrowTop == 3 && kParamBorrowSecond == 4 && kParamBorrowThird == 5 &&
-                  kParamContraryMotion == 6,
+                  kParamContraryMotion == 6 && kParamVelBottom == 7 && kParamVelSecond == 8 &&
+                  kParamVelThird == 9 && kParamVelTop == 10 && kParamVelContrary == 11,
               "ids are frozen");
+
+// The velocity parameter of each generated note of one trigger: the four chord notes
+// low to high (the chord comes out sorted ascending), and the contrary motion's extra
+// note (index kStackedChordNotes).
+constexpr ParamId kNoteVelocityParams[kStackedChordNotes + 1] = {
+    kParamVelBottom, kParamVelSecond, kParamVelThird, kParamVelTop, kParamVelContrary};
 
 const char *kNoteNames[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
 
@@ -277,6 +297,11 @@ struct Bhl
     gui.borrowSecond.store(paramInt(kParamBorrowSecond), std::memory_order_relaxed);
     gui.borrowThird.store(paramInt(kParamBorrowThird), std::memory_order_relaxed);
     gui.contraryMotion.store(paramInt(kParamContraryMotion), std::memory_order_relaxed);
+    gui.velBottom.store(paramValue(kParamVelBottom), std::memory_order_relaxed);
+    gui.velSecond.store(paramValue(kParamVelSecond), std::memory_order_relaxed);
+    gui.velThird.store(paramValue(kParamVelThird), std::memory_order_relaxed);
+    gui.velTop.store(paramValue(kParamVelTop), std::memory_order_relaxed);
+    gui.velContrary.store(paramValue(kParamVelContrary), std::memory_order_relaxed);
   }
 
   BorrowSettings borrowSettings() const
@@ -289,6 +314,17 @@ struct Bhl
   bool contraryMotionEnabled() const
   {
     return paramInt(kParamContraryMotion) != 0;
+  }
+
+  // The note-on velocity of a generated note: the pressed note's velocity times the
+  // note's percentage parameter. Above 100% amplifies; the result is clamped to
+  // CLAP's 0..1 velocity range.
+  double scaleVelocity(ParamId id, double base) const
+  {
+    const double v = base * paramValue(id);
+    if (v < 0.0) return 0.0;
+    if (v > 1.0) return 1.0;
+    return v;
   }
 
   void clearContrarySession()
@@ -461,6 +497,21 @@ void drainGuiRequests(Bhl *rc, const clap_output_events_t *out, uint32_t time)
         break;
       case GuiState::Request::ContraryMotion:
         id = kParamContraryMotion;
+        break;
+      case GuiState::Request::VelBottom:
+        id = kParamVelBottom;
+        break;
+      case GuiState::Request::VelSecond:
+        id = kParamVelSecond;
+        break;
+      case GuiState::Request::VelThird:
+        id = kParamVelThird;
+        break;
+      case GuiState::Request::VelTop:
+        id = kParamVelTop;
+        break;
+      case GuiState::Request::VelContrary:
+        id = kParamVelContrary;
         break;
     }
 
@@ -755,7 +806,8 @@ void revoiceHeldChord(Bhl *rc, HeldChord *held, const clap_event_note_t *note,
       held->voices[count].key = static_cast<int16_t>(chord.notes[j]);
       held->voices[count].noteId =
           acquireVoice(rc, out, note->header.time, held->channel,
-                       static_cast<int16_t>(chord.notes[j]), held->velocity);
+                       static_cast<int16_t>(chord.notes[j]),
+                       rc->scaleVelocity(kNoteVelocityParams[j], held->velocity));
       rc->gui.chordOn(chord.notes[j]);
     }
     ++count;
@@ -875,7 +927,7 @@ bool restoreBorrowedForm(Bhl *rc, const clap_event_note_t *note, const clap_outp
         h.voices[count].key = static_cast<int16_t>(keep[k]);
         h.voices[count].noteId =
             acquireVoice(rc, out, note->header.time, h.channel, static_cast<int16_t>(keep[k]),
-                         h.velocity);
+                         rc->scaleVelocity(kNoteVelocityParams[k], h.velocity));
         rc->gui.chordOn(keep[k]);
       }
       ++count;
@@ -972,7 +1024,7 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
 
     held->voices[i].noteId =
         acquireVoice(rc, out, note->header.time, channel, static_cast<int16_t>(chord.notes[i]),
-                     note->velocity);
+                     rc->scaleVelocity(kNoteVelocityParams[i], note->velocity));
   }
 
   // With contrary motion on, an in-scale press above the session key adds the
@@ -997,7 +1049,8 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
       held->voices[held->count].key = static_cast<int16_t>(extraNote);
       held->voices[held->count].noteId =
           acquireVoice(rc, out, note->header.time, channel, static_cast<int16_t>(extraNote),
-                       note->velocity);
+                       rc->scaleVelocity(kNoteVelocityParams[kStackedChordNotes],
+                                           note->velocity));
       rc->gui.chordOn(extraNote);
       ++held->count;
     }
@@ -1249,6 +1302,13 @@ bool CLAP_ABI paramsValueToText(const clap_plugin_t *, clap_id id, double value,
     case kParamContraryMotion:
       snprintf(out, cap, "%s", v >= 0.5 ? "On" : "Off");
       return true;
+    case kParamVelBottom:
+    case kParamVelSecond:
+    case kParamVelThird:
+    case kParamVelTop:
+    case kParamVelContrary:
+      snprintf(out, cap, "%.0f%%", value * 100.0);
+      return true;
     case kParamControlRoot:
     case kParamTriggerStart:
     {
@@ -1296,6 +1356,22 @@ bool CLAP_ABI paramsTextToValue(const clap_plugin_t *, clap_id id, const char *t
       {
         *out = 0;
         return true;
+      }
+      break;
+    case kParamVelBottom:
+    case kParamVelSecond:
+    case kParamVelThird:
+    case kParamVelTop:
+    case kParamVelContrary:
+      // Accept a plain factor ("1.5") or a percentage ("150%").
+      {
+        char *end = nullptr;
+        const double v = strtod(text, &end);
+        if (end != text)
+        {
+          *out = (end && *end == '%') ? v / 100.0 : v;
+          return true;
+        }
       }
       break;
     default:

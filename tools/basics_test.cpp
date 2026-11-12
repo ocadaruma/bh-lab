@@ -2,6 +2,7 @@
 // octave, stacked chords in the trigger zone, and pass-through of out-of-scale notes.
 
 #include <algorithm>
+#include <cmath>
 #include <initializer_list>
 
 #include "clap_test_host.h"
@@ -23,6 +24,11 @@ void reset(const clap_plugin_t *plugin, Timeline *timeline)
   setup.addParam(kBorrowSecond, 0);   // None
   setup.addParam(kBorrowThird, 0);    // None
   setup.addParam(kContraryMotion, 0); // Off
+  setup.addParam(kVelBottom, 1.0);
+  setup.addParam(kVelSecond, 1.0);
+  setup.addParam(kVelThird, 1.0);
+  setup.addParam(kVelTop, 1.0);
+  setup.addParam(kVelContrary, 1.0);
   (void)plugin;
   timeline->run(&setup);
   timeline->runFor(2);
@@ -44,6 +50,19 @@ std::string describe(const std::vector<Emitted> &events)
   {
     if (!text.empty()) text += " ";
     text += (e.on ? "on:" : "off:") + std::to_string(e.key);
+  }
+  return text;
+}
+
+// describe, with each event's velocity in percent, for the velocity checks.
+std::string describeVel(const std::vector<Emitted> &events)
+{
+  std::string text;
+  for (const auto &e : events)
+  {
+    if (!text.empty()) text += " ";
+    text += std::string(e.on ? "on" : "off") + ":" + std::to_string(e.key) + "@"
+            + std::to_string((int)std::lround(e.velocity * 100.0));
   }
   return text;
 }
@@ -1502,6 +1521,85 @@ int main()
     timeline.run(&release);
   }
   expect("the control release is silent", g_emitted.empty(), describe(g_emitted));
+
+  // --- note velocity scaling ----------------------------------------------------
+  // Each note a trigger generates sounds at the trigger note's velocity times its own
+  // percentage: here bottom 50%, 2nd 100%, 3rd 150% and top 200%. A trigger at 0.8
+  // therefore comes out at 0.4, 0.8, 1.0 and 1.0 -- the over-100% values amplify and
+  // clamp at the top of the velocity range. The contrary note runs at 75%.
+  reset(plugin, &timeline);
+  {
+    InputEvents setup;
+    setup.addParam(kVelBottom, 0.5);
+    setup.addParam(kVelSecond, 1.0);
+    setup.addParam(kVelThird, 1.5);
+    setup.addParam(kVelTop, 2.0);
+    setup.addParam(kVelContrary, 0.75);
+    setup.addParam(kContraryMotion, 1);  // On
+    timeline.run(&setup);
+  }
+  holdControl(&timeline, {48});  // C2: C major 6th in force
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 69, 0.8);  // A4 -> C4 E4 G4 A4
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool scaled = first.size() == 4 && first[0].key == 60 && first[1].key == 64 &&
+                        first[2].key == 67 && first[3].key == 69 &&
+                        std::abs(first[0].velocity - 0.4) < 1e-6 &&
+                        std::abs(first[1].velocity - 0.8) < 1e-6 &&
+                        first[2].velocity == 1.0 && first[3].velocity == 1.0;
+    expect("chord notes sound at the trigger velocity times their percentage (clamped to 1.0)",
+           scaled, describeVel(first));
+  }
+  // B4 over the A4 session: B4's own chord D4 F4 Ab4 B4 at the scaled velocities, then
+  // the contrary note B3 at 75% of the press (0.6). The session chord yields after.
+  g_emitted.clear();
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 71, 0.8);
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool scaled = first.size() == 9 &&
+                        first[0].on && first[0].key == 62 &&
+                        std::abs(first[0].velocity - 0.4) < 1e-6 &&
+                        first[1].on && first[1].key == 65 &&
+                        std::abs(first[1].velocity - 0.8) < 1e-6 &&
+                        first[2].on && first[2].key == 68 && first[2].velocity == 1.0 &&
+                        first[3].on && first[3].key == 71 && first[3].velocity == 1.0 &&
+                        first[4].on && first[4].key == 59 &&
+                        std::abs(first[4].velocity - 0.6) < 1e-6 &&
+                        !first[5].on && !first[6].on && !first[7].on && !first[8].on;
+    expect("the contrary note takes its own percentage; the session chord yields",
+           scaled, describeVel(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 71, 0.0);
+    timeline.run(&release);
+  }
+  {
+    int offs = 0;
+    for (const auto &e : g_emitted)
+      if (!e.on) ++offs;
+    expect("releasing B4 stops its chord and the contrary note (5 offs)", offs == 5,
+           describe(g_emitted));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 69, 0.0);  // A4, the session key
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 48, 0.0);
+    timeline.run(&release);
+  }
+  expect("releasing A4 and the control note is silent (its chord already yielded)",
+         g_emitted.empty(), describe(g_emitted));
+  g_emitted.clear();
 
   plugin->stop_processing(plugin);
   plugin->destroy(plugin);

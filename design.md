@@ -89,6 +89,13 @@ Based on Barry Harris's diminished scale, the plugin triggers a chord
       - If we set "borrow top and 2nd-top notes from next", and press B, it will trigger C E Ab B first
       - In the middle of holding B, if we additionally press A, it will release Ab B, and trigger G and A instead
 
+## Note velocities
+- Each note a trigger generates sounds at the pressed (trigger) note's velocity times its own percentage, clamped to the 0..1 range:
+  * The four chord notes, bottom to top: each has its own percentage (Velocity Bottom / 2nd / 3rd / Top)
+  * The contrary motion's extra note: its own percentage (Velocity Contrary)
+- The default is 100% for every note. Percentages above 100% amplify; the result tops out at full velocity (e.g. a press at 80% with a 150% note comes out at 100%). 0% silences the note without changing what it plays
+- In the GUI each percentage steps by 5% on the arrow areas; clicking the readout itself opens an inline editor for direct number input (typed as a percentage, e.g. "150" or "75%")
+
 ## Contrary motion
 - Contrary motion is a note movement where the right/left hands go in opposite directions: while the right hand moves up, the left hand moves down.
 - It is an on/off switch. When on, the borrow revert behavior (above) is disabled.

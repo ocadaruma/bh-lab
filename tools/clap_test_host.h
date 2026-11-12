@@ -96,6 +96,7 @@ struct Emitted
   uint64_t sample = 0;  // Absolute, not relative to the block.
   int key = 0;
   bool on = false;
+  double velocity = 0;
 };
 
 std::vector<Emitted> g_emitted;
@@ -109,7 +110,7 @@ bool CLAP_ABI collectEvent(const clap_output_events_t *, const clap_event_header
 
   const auto *note = reinterpret_cast<const clap_event_note_t *>(header);
   g_emitted.push_back({g_blockStart + header->time, note->key,
-                       header->type == CLAP_EVENT_NOTE_ON});
+                       header->type == CLAP_EVENT_NOTE_ON, note->velocity});
   return true;
 }
 
@@ -216,5 +217,10 @@ constexpr clap_id kBorrowTop = 3;
 constexpr clap_id kBorrowSecond = 4;
 constexpr clap_id kBorrowThird = 5;
 constexpr clap_id kContraryMotion = 6;
+constexpr clap_id kVelBottom = 7;
+constexpr clap_id kVelSecond = 8;
+constexpr clap_id kVelThird = 9;
+constexpr clap_id kVelTop = 10;
+constexpr clap_id kVelContrary = 11;
 
 }  // namespace bhl_test
