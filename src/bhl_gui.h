@@ -216,7 +216,8 @@ struct ViewRect
 
 ViewRect guiStepperRect(StepperId stepper, double viewWidth);
 
-// Test support: a voicing row button, by its index.
+// Test support: a voicing button of the 2x2 grid, by its index (Close, Drop2, Drop3,
+// Drop2&4).
 ViewRect guiVoicingButtonRect(int index, double viewWidth);
 
 // Test support: a borrow row button. Row 0 is the top voice, 1 the second, 2 the third;
@@ -226,8 +227,9 @@ ViewRect guiBorrowButtonRect(int row, int index, double viewWidth);
 // Test support: the contrary motion toggle.
 ViewRect guiContraryToggleRect(double viewWidth);
 
-// Test support: a velocity stepper, by its index (0 bottom, 1 second, 2 third, 3 top,
-// 4 contrary note).
+// Test support: a velocity fader's track, by its note index (0 bottom, 1 second,
+// 2 third, 3 top, 4 contrary note); the display rows read TOP | 3RD | 2ND | BOTTOM |
+// CONTRARY.
 ViewRect guiVelStepperRect(int index, double viewWidth);
 
 // Platform view lifecycle. The returned handle is an NSView* on macOS.

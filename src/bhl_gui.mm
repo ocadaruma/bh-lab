@@ -1,6 +1,9 @@
-// Cocoa view for bh-lab: the selected scale in the header, and a single 88-key board
-// in which the control zone, the trigger zone, and the active scale / chord / notes
-// are drawn by color.
+// Cocoa view for bh-lab.
+//
+// Layout, per the mockup (mockup/ui-mockup.html): a header with the scale in force
+// and the playing state; three side-by-side panels -- Voicing (2x2 buttons plus the
+// contrary-motion toggle), Borrowing (a 3x3 matrix), Note Velocity (five faders); a row
+// of control/trigger zone steppers; and the 88-key board with the zones drawn by color.
 //
 // Compiled without ARC (the CMake default for .mm), so the view is retained and released
 // manually by guiCreate/guiDestroy.
@@ -19,109 +22,15 @@ using namespace bhl;
 namespace
 {
 
-constexpr uint32_t kViewWidth = 810;
-constexpr uint32_t kViewHeight = 394;
+constexpr uint32_t kViewWidth = 920;
+constexpr uint32_t kViewHeight = 420;
 
 // The keyboard is a full 88-key board (A0..G8), covering every zone with room either
 // side.
 constexpr int kKeyboardLow = 21;
 constexpr int kKeyboardHigh = 108;
 
-constexpr CGFloat kPad = 18;
-constexpr CGFloat kLabelWidth = 60;
-constexpr CGFloat kBorrowLabelWidth = 82;
-constexpr CGFloat kStepperWidth = 170;
-constexpr CGFloat kButtonGap = 8;
-
-// Row geometry.
-constexpr CGFloat kVoicingRowY = 72;
-constexpr CGFloat kBorrowTopRowY = 108;
-constexpr CGFloat kBorrowSecondRowY = 144;
-constexpr CGFloat kBorrowThirdRowY = 180;
-constexpr CGFloat kContraryRowY = 216;
-constexpr CGFloat kVelocityRowY = 252;
-constexpr CGFloat kRowHeight = 30;
-
-// The keyboard sits a gap below the stacking rows: it controls the zones, which is a
-// different role than the voicing / borrow picks above.
-constexpr CGFloat kKeyboardLabelY = 288;
-constexpr CGFloat kKeyboardY = 304;
-constexpr CGFloat kKeyboardHeight = 72;
-
-NSRect voicingButtonRect(int index, CGFloat viewWidth)
-{
-  const CGFloat x0 = kPad + kLabelWidth + 6;
-  const CGFloat total = viewWidth - kPad - x0;
-  const int count = static_cast<int>(VoicingType::Count);
-  const CGFloat w = (total - kButtonGap * (count - 1)) / count;
-  return NSMakeRect(x0 + index * (w + kButtonGap), kVoicingRowY, w, kRowHeight);
-}
-
-NSRect borrowButtonRect(int row, int index, CGFloat viewWidth)
-{
-  static const CGFloat kRowY[3] = {kBorrowTopRowY, kBorrowSecondRowY, kBorrowThirdRowY};
-  const CGFloat x0 = kPad + kBorrowLabelWidth + 6;
-  const CGFloat total = viewWidth - kPad - x0;
-  const int count = static_cast<int>(BorrowDir::Count);
-  const CGFloat w = (total - kButtonGap * (count - 1)) / count;
-  return NSMakeRect(x0 + index * (w + kButtonGap), kRowY[row], w, kRowHeight);
-}
-
-// The contrary motion row: a single toggle switch, off by default.
-constexpr CGFloat kToggleWidth = 92;
-constexpr CGFloat kToggleHeight = 22;
-
-// The velocity row: one percentage stepper per generated note of one trigger --
-// the contrary note first, then the four chord notes low to high.
-constexpr int kVelStepperCount = kStackedChordNotes + 1;
-constexpr CGFloat kVelStepperHeight = 24;
-
-// The note indices behind the five steppers: 0 bottom, 1 second, 2 third, 3 top,
-// 4 contrary note (the same order as the parameters). The slots read left to right
-// with the contrary note first.
-const char *kVelNames[kVelStepperCount] = {"BOTTOM", "2ND", "3RD", "TOP", "CONTR."};
-const int kVelDisplayOrder[kVelStepperCount] = {4, 0, 1, 2, 3};
-
-NSRect velStepperRect(int index, CGFloat viewWidth)
-{
-  const CGFloat x0 = kPad + kLabelWidth + 6;
-  const CGFloat total = viewWidth - kPad - x0;
-  const CGFloat w = (total - kButtonGap * (kVelStepperCount - 1)) / kVelStepperCount;
-  return NSMakeRect(x0 + index * (w + kButtonGap),
-                    kVelocityRowY + (kRowHeight - kVelStepperHeight) / 2, w,
-                    kVelStepperHeight);
-}
-
-NSRect contraryToggleRect(CGFloat viewWidth)
-{
-  const CGFloat x0 = kPad + kLabelWidth + 6;
-  return NSMakeRect(x0, kContraryRowY + (kRowHeight - kToggleHeight) / 2, kToggleWidth,
-                    kToggleHeight);
-}
-
-// The borrow buttons read Prev | None | Next, left to right.
-const int kBorrowDisplayOrder[3] = {static_cast<int>(BorrowDir::Prev),
-                                    static_cast<int>(BorrowDir::None),
-                                    static_cast<int>(BorrowDir::Next)};
-
-// The two zone steppers share the keyboard label row, side by side on the right: the
-// control start on the left, the trigger start at the far right.
-NSRect triggerStartStepperRect(CGFloat viewWidth)
-{
-  return NSMakeRect(viewWidth - kPad - kStepperWidth, kKeyboardLabelY - 2, kStepperWidth,
-                    20);
-}
-
-NSRect controlRootStepperRect(CGFloat viewWidth)
-{
-  return NSMakeRect(viewWidth - kPad - kStepperWidth * 2 - kButtonGap, kKeyboardLabelY - 2,
-                    kStepperWidth, 20);
-}
-
-NSRect keyboardRect(CGFloat viewWidth)
-{
-  return NSMakeRect(kPad, kKeyboardY, viewWidth - 2 * kPad, kKeyboardHeight);
-}
+// ---- Palette (mockup colours). ----
 
 NSColor *gray(CGFloat v, CGFloat a = 1.0)
 {
@@ -133,9 +42,79 @@ NSColor *rgb(CGFloat r, CGFloat g, CGFloat b)
   return [NSColor colorWithCalibratedRed:r green:g blue:b alpha:1.0];
 }
 
-NSColor *accent()  // Sounding notes in the plain zone; general UI accent.
+NSColor *viewBg()  // #17181b
 {
-  return rgb(0.27, 0.56, 0.96);
+  return rgb(0.090, 0.094, 0.106);
+}
+
+NSColor *panelBg()  // #232428 -- the three panels.
+{
+  return rgb(0.137, 0.141, 0.157);
+}
+
+NSColor *panelFill()  // #1d1e22 -- idle buttons.
+{
+  return rgb(0.114, 0.118, 0.133);
+}
+
+NSColor *lineSoft()  // #2b2c30 -- borders and dividers.
+{
+  return rgb(0.169, 0.173, 0.188);
+}
+
+NSColor *trackBg()  // #141518 -- fader tracks.
+{
+  return rgb(0.078, 0.082, 0.094);
+}
+
+NSColor *textDim()  // #9a9ba1
+{
+  return rgb(0.604, 0.608, 0.631);
+}
+
+NSColor *textFaint()  // #6d6e74
+{
+  return rgb(0.427, 0.431, 0.455);
+}
+
+NSColor *textLit()  // #ececee
+{
+  return rgb(0.925, 0.925, 0.933);
+}
+
+NSColor *accent()  // #e6a23c -- the warm orange: selected buttons, fader fills.
+{
+  return rgb(0.902, 0.639, 0.235);
+}
+
+NSColor *accentDark()  // #b87f27 -- the border of a selected button.
+{
+  return rgb(0.722, 0.498, 0.153);
+}
+
+NSColor *greenLit()  // The control zone's colour, light enough to read as text.
+{
+  return rgb(0.553, 0.855, 0.682);
+}
+
+NSColor *greenFill()  // #6fbf92-ish -- a selected Prev/Next borrow button.
+{
+  return rgb(0.455, 0.694, 0.439);
+}
+
+NSColor *greenDark()  // #3d8259-ish -- its border.
+{
+  return rgb(0.239, 0.510, 0.353);
+}
+
+NSColor *violetFill()  // #a482e6-ish -- the contrary-motion toggle, on.
+{
+  return rgb(0.553, 0.447, 0.839);
+}
+
+NSColor *violetDark()  // #7d57c4-ish -- its border.
+{
+  return rgb(0.427, 0.302, 0.710);
 }
 
 // A key's zone: the control octave, else everything at or above the trigger start,
@@ -166,6 +145,157 @@ NSColor *zoneActive(Zone zone)  // Chord notes, pressed or generated alike; the 
     case Zone::Trigger: return rgb(0.94, 0.58, 0.14);
     default:            return rgb(0.27, 0.56, 0.96);
   }
+}
+
+// ---- Geometry: the three panels. ----
+
+constexpr CGFloat kPad = 20;
+constexpr CGFloat kPanelGap = 14;
+constexpr CGFloat kPanelY = 72;
+constexpr CGFloat kPanelH = 196;
+constexpr CGFloat kPanelW = (kViewWidth - 2 * kPad - 2 * kPanelGap) / 3;  // 284
+constexpr CGFloat kPanelPad = 14;
+constexpr CGFloat kInnerW = kPanelW - 2 * kPanelPad;  // 256
+
+CGFloat panelX(int i)
+{
+  return kPad + i * (kPanelW + kPanelGap);
+}
+
+// ---- Voicing panel: a 2x2 grid of buttons (Close | Drop 2 / Drop 3 | Drop 2&4) and,
+// below a divider, the contrary-motion toggle. ----
+
+constexpr CGFloat kBtnH = 40;
+constexpr CGFloat kBtnGap = 8;
+constexpr CGFloat kVoicingGridY = kPanelY + 34;
+
+NSRect voicingButtonRect(int index, CGFloat viewWidth)
+{
+  (void)viewWidth;
+  const CGFloat w = (kInnerW - kBtnGap) / 2;
+  const int col = index % 2;
+  const int row = index / 2;
+  return NSMakeRect(panelX(0) + kPanelPad + col * (w + kBtnGap),
+                    kVoicingGridY + row * (kBtnH + kBtnGap), w, kBtnH);
+}
+
+// The contrary motion switch (its label sits to the right; only the switch is
+// clickable).
+constexpr CGFloat kToggleWidth = 40;
+constexpr CGFloat kToggleHeight = 22;
+
+NSRect contraryToggleRect(CGFloat viewWidth)
+{
+  (void)viewWidth;
+  return NSMakeRect(panelX(0) + kPanelPad, kPanelY + 144, kToggleWidth, kToggleHeight);
+}
+
+// ---- Borrowing panel: a 3x3 matrix. The row labels read Top / 2nd / 3rd; the column
+// slots read Prev | None | Next, under a small header row. ----
+
+constexpr CGFloat kBorrowLabelW = 44;
+constexpr CGFloat kBorrowHeadY = kPanelY + 34;
+constexpr CGFloat kBorrowRow0Y = kPanelY + 52;
+constexpr CGFloat kBorrowRowStep = kBtnH + 9;
+
+CGFloat borrowColWidth()
+{
+  return (kInnerW - kBorrowLabelW - 2 * kBtnGap) / 3;
+}
+
+CGFloat borrowColX(int slot)
+{
+  return panelX(1) + kPanelPad + kBorrowLabelW + slot * (borrowColWidth() + kBtnGap);
+}
+
+NSRect borrowButtonRect(int row, int slot, CGFloat viewWidth)
+{
+  (void)viewWidth;
+  return NSMakeRect(borrowColX(slot), kBorrowRow0Y + row * kBorrowRowStep, borrowColWidth(),
+                    kBtnH);
+}
+
+// The slots read Prev | None | Next, left to right.
+const int kBorrowSlotDirs[3] = {static_cast<int>(BorrowDir::Prev),
+                                static_cast<int>(BorrowDir::None),
+                                static_cast<int>(BorrowDir::Next)};
+
+// ---- Note velocity panel: five faders stacked in pitch order (Top, 3rd, 2nd, Bottom)
+// with the contrary fader below a divider. Click or drag the track to set, in 5% steps;
+// double-click resets the note to 100%. ----
+
+constexpr int kVelStepperCount = kStackedChordNotes + 1;
+constexpr CGFloat kVelRowH = 24;
+constexpr CGFloat kVelTrackH = 8;
+constexpr CGFloat kVelLabelW = 56;
+constexpr CGFloat kVelValueW = 40;
+
+// Display slot -> note index (0 bottom, 1 second, 2 third, 3 top, 4 contrary).
+const int kVelDisplayOrder[kVelStepperCount] = {3, 2, 1, 0, 4};
+const char *kVelNames[kVelStepperCount] = {"BOTTOM", "2ND", "3RD", "TOP", "CONTRARY"};
+
+// Row tops: four fader rows, a divider, then the contrary fader.
+const CGFloat kVelRowY[kVelStepperCount] = {kPanelY + 36, kPanelY + 65, kPanelY + 94,
+                                            kPanelY + 123, kPanelY + 158};
+
+NSRect velTrackRect(int slot, CGFloat viewWidth)
+{
+  (void)viewWidth;
+  const CGFloat x = panelX(2) + kPanelPad + kVelLabelW + 8;
+  const CGFloat w = kInnerW - kVelLabelW - 8 - kVelValueW - 8;
+  return NSMakeRect(x, kVelRowY[slot] + (kVelRowH - kVelTrackH) / 2, w, kVelTrackH);
+}
+
+// The clickable span of a fader row: the track with slack either side.
+NSRect velRowRect(int slot, CGFloat viewWidth)
+{
+  const NSRect t = velTrackRect(slot, viewWidth);
+  return NSMakeRect(t.origin.x - 8, kVelRowY[slot], t.size.width + 16, kVelRowH);
+}
+
+// The request a note index (0 bottom, 1 second, 2 third, 3 top, 4 contrary) maps to.
+GuiState::Request velRequest(int index)
+{
+  switch (index)
+  {
+    case 0: return GuiState::Request::VelBottom;
+    case 1: return GuiState::Request::VelSecond;
+    case 2: return GuiState::Request::VelThird;
+    case 3: return GuiState::Request::VelTop;
+    default: return GuiState::Request::VelContrary;
+  }
+}
+
+// ---- Zone steppers: CONTROL @ and TRIGGER @, each [ label | < | value | > ]. ----
+
+constexpr CGFloat kZoneRowY = kPanelY + kPanelH + 14;  // 282
+constexpr CGFloat kZoneStepperH = 36;
+constexpr CGFloat kZoneLabelW = 74;
+constexpr CGFloat kZoneBtnW = 24;
+constexpr CGFloat kZoneValueW = 48;
+constexpr CGFloat kZoneStepperW = kZoneLabelW + 2 * kZoneBtnW + kZoneValueW;  // 170
+
+NSRect triggerStartStepperRect(CGFloat viewWidth)
+{
+  (void)viewWidth;
+  return NSMakeRect(kPad + kZoneStepperW + kPanelGap, kZoneRowY, kZoneStepperW,
+                    kZoneStepperH);
+}
+
+NSRect controlRootStepperRect(CGFloat viewWidth)
+{
+  (void)viewWidth;
+  return NSMakeRect(kPad, kZoneRowY, kZoneStepperW, kZoneStepperH);
+}
+
+// ---- Keyboard. ----
+
+constexpr CGFloat kKeyboardY = kZoneRowY + kZoneStepperH + 14;  // 332
+constexpr CGFloat kKeyboardHeight = 72;
+
+NSRect keyboardRect(CGFloat viewWidth)
+{
+  return NSMakeRect(kPad, kKeyboardY, viewWidth - 2 * kPad, kKeyboardHeight);
 }
 
 void drawText(NSString *text, NSRect rect, CGFloat size, NSColor *color, NSTextAlignment align,
@@ -237,32 +367,6 @@ ScaleSelection decodeSelectionLocal(int encoded)
   return {static_cast<ScaleFamily>(encoded / 12), encoded % 12};
 }
 
-// The velocity atomic behind a stepper index (0 bottom, 1 second, 2 third, 3 top,
-// 4 contrary), so the row's code can treat the five values uniformly.
-const std::atomic<double> *velValue(GuiState *state, int index)
-{
-  switch (index)
-  {
-    case 0: return &state->velBottom;
-    case 1: return &state->velSecond;
-    case 2: return &state->velThird;
-    case 3: return &state->velTop;
-    default: return &state->velContrary;
-  }
-}
-
-GuiState::Request velRequest(int index)
-{
-  switch (index)
-  {
-    case 0: return GuiState::Request::VelBottom;
-    case 1: return GuiState::Request::VelSecond;
-    case 2: return GuiState::Request::VelThird;
-    case 3: return GuiState::Request::VelTop;
-    default: return GuiState::Request::VelContrary;
-  }
-}
-
 // What the UI last drew, so the timer can skip redundant redraws.
 struct Snapshot
 {
@@ -324,18 +428,22 @@ Snapshot takeSnapshot(GuiState *state)
 
 }  // namespace
 
-@interface BhlView : NSView <NSTextFieldDelegate>
+@interface BhlView : NSView
 {
   bhl::GuiState *_state;
   NSTimer *_timer;
   Snapshot _lastDrawn;
-  NSTextField *_velField;  // The inline editor over a velocity stepper, nil when not editing.
-  int _velFieldIndex;
+  int _velDragIndex;  // The fader slot being dragged, -1 when none.
 }
 - (id)initWithState:(bhl::GuiState *)state;
 - (void)stopTimer;
-- (void)beginVelEdit:(int)index;
-- (void)endVelEdit;
+- (void)drawPanel:(NSRect)r title:(NSString *)title;
+- (void)drawSegButton:(NSRect)r title:(NSString *)title selected:(BOOL)selected
+               green:(BOOL)green;
+- (void)drawFaderRow:(int)slot value:(double)v;
+- (void)drawZoneStepper:(NSRect)r label:(NSString *)label labelColor:(NSColor *)color
+                  value:(NSString *)value;
+- (void)velSetFromPoint:(NSPoint)p slot:(int)slot;
 @end
 
 @implementation BhlView
@@ -350,6 +458,7 @@ Snapshot takeSnapshot(GuiState *state)
 
   _state = state;
   _lastDrawn = Snapshot();
+  _velDragIndex = -1;
   _timer = [[NSTimer scheduledTimerWithTimeInterval:1.0 / 30.0
                                              target:self
                                            selector:@selector(tick:)
@@ -368,56 +477,9 @@ Snapshot takeSnapshot(GuiState *state)
   }
 }
 
-// Dismounts the inline editor. The typed text is a percentage of the trigger note's
-// velocity (a trailing "%" is fine); anything unparseable is ignored and the current
-// value stands.
-- (void)endVelEdit
-{
-  if (!_velField) return;
-
-  const char *cstr = [_velField stringValue].UTF8String;
-  char *end = nullptr;
-  const double raw = cstr ? strtod(cstr, &end) : -1.0;
-  if (cstr && end != cstr && raw >= 0.0)
-    _state->request(velRequest(_velFieldIndex), raw / 100.0);
-
-  [_velField removeFromSuperview];
-  [_velField release];
-  _velField = nil;
-  _velFieldIndex = -1;
-  [self setNeedsDisplay:YES];
-}
-
-// Puts an inline editor over a velocity stepper, pre-filled with the current
-// percentage, so a value can be typed directly. Return -- or a click elsewhere, which
-// ends the edit -- commits it.
-- (void)beginVelEdit:(int)index
-{
-  if (_velField) return;
-  _velFieldIndex = index;
-
-  const NSRect r = NSInsetRect(velStepperRect(index, [self bounds].size.width), 1, 1);
-  _velField = [[NSTextField alloc] initWithFrame:r];
-  [_velField setAlignment:NSTextAlignmentCenter];
-  [_velField setFont:[NSFont systemFontOfSize:9.5 weight:NSFontWeightSemibold]];
-  [_velField setDelegate:self];
-  [_velField setStringValue:[NSString stringWithFormat:@"%.0f",
-                             velValue(_state, index)->load(std::memory_order_relaxed) *
-                                 100.0]];
-  [self addSubview:_velField];
-  if ([self window]) [[self window] makeFirstResponder:_velField];
-  [_velField selectText:nil];
-}
-
 - (void)dealloc
 {
   [self stopTimer];
-  if (_velField)
-  {
-    [_velField removeFromSuperview];
-    [_velField release];
-    _velField = nil;
-  }
   [super dealloc];
 }
 
@@ -436,64 +498,122 @@ Snapshot takeSnapshot(GuiState *state)
   [self setNeedsDisplay:YES];
 }
 
-// A button in a selectable row: filled when selected, dim when the row is not in play.
-- (void)drawButton:(NSRect)r title:(NSString *)title selected:(BOOL)selected inert:(BOOL)inert
+// One of the three panels: a rounded card with a small-caps title.
+- (void)drawPanel:(NSRect)r title:(NSString *)title
 {
-  NSColor *fill = selected ? accent() : (inert ? gray(0.20) : gray(0.28));
-  [fill setFill];
-  NSRectFill(r);
-  [gray(0.10) setFill];
-  NSFrameRect(r);
-  drawText(title, NSMakeRect(r.origin.x, NSMidY(r) - 7, r.size.width, 14), 10.5,
-           selected ? gray(1.0) : gray(0.72), NSTextAlignmentCenter,
-           selected ? NSFontWeightSemibold : NSFontWeightRegular);
+  NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:r xRadius:10 yRadius:10];
+  [panelBg() setFill];
+  [path fill];
+  [lineSoft() setStroke];
+  [path setLineWidth:1];
+  [path stroke];
+  drawText(title, NSMakeRect(r.origin.x + kPanelPad, r.origin.y + 12,
+                             r.size.width - 2 * kPanelPad, 14), 9.5, textFaint(),
+           NSTextAlignmentLeft, NSFontWeightSemibold);
 }
 
-// A borrow direction button: Prev / Next are drawn as arrows pointing their way, None
-// as a plain button.
-- (void)drawBorrowButton:(NSRect)r dir:(int)dir selected:(BOOL)selected
+// A button in the voicing grid or the borrow matrix: dark when idle, warm orange when
+// selected (green for an active Prev/Next, which moves a voice sideways).
+- (void)drawSegButton:(NSRect)r title:(NSString *)title selected:(BOOL)selected
+               green:(BOOL)green
 {
-  if (dir == static_cast<int>(BorrowDir::None))
+  NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:r xRadius:7 yRadius:7];
+  if (selected)
   {
-    [self drawButton:r title:@"None" selected:selected inert:NO];
-    return;
-  }
-
-  const CGFloat tip = 12;
-  // Inset by half the stroke width so the stroked edge lands exactly on the rect,
-  // like NSFrameRect does for the plain buttons.
-  const NSRect ir = NSInsetRect(r, 0.5, 0.5);
-  NSBezierPath *path = [NSBezierPath bezierPath];
-  if (dir == static_cast<int>(BorrowDir::Prev))
-  {
-    [path moveToPoint:NSMakePoint(ir.origin.x + tip, ir.origin.y)];
-    [path lineToPoint:NSMakePoint(NSMaxX(ir), ir.origin.y)];
-    [path lineToPoint:NSMakePoint(NSMaxX(ir), NSMaxY(ir))];
-    [path lineToPoint:NSMakePoint(ir.origin.x + tip, NSMaxY(ir))];
-    [path lineToPoint:NSMakePoint(ir.origin.x, NSMidY(ir))];
+    [green ? greenFill() : accent() setFill];
+    [path fill];
+    // NB: after attributed text drawing the context's stroke color is left as the text
+    // color, so set the stroke explicitly rather than relying on the fill.
+    [green ? greenDark() : accentDark() setStroke];
   }
   else
   {
-    [path moveToPoint:NSMakePoint(ir.origin.x, ir.origin.y)];
-    [path lineToPoint:NSMakePoint(NSMaxX(ir) - tip, ir.origin.y)];
-    [path lineToPoint:NSMakePoint(NSMaxX(ir), NSMidY(ir))];
-    [path lineToPoint:NSMakePoint(NSMaxX(ir) - tip, NSMaxY(ir))];
-    [path lineToPoint:NSMakePoint(ir.origin.x, NSMaxY(ir))];
+    [panelFill() setFill];
+    [path fill];
+    [lineSoft() setStroke];
   }
-  [path closePath];
-
-  NSColor *fill = selected ? accent() : gray(0.28);
-  [fill setFill];
-  [path fill];
-  // NB: after attributed text drawing the context's stroke color is left as the text
-  // color, so set the stroke explicitly rather than relying on the fill.
-  [gray(0.10) setStroke];
   [path setLineWidth:1];
   [path stroke];
-  drawText(dir == static_cast<int>(BorrowDir::Prev) ? @"Prev" : @"Next",
-           NSMakeRect(r.origin.x, NSMidY(r) - 7, r.size.width, 14), 10.5,
-           selected ? gray(1.0) : gray(0.72), NSTextAlignmentCenter,
+  drawText(title, NSMakeRect(r.origin.x, NSMidY(r) - 8, r.size.width, 16), 12,
+           selected ? rgb(0.10, 0.07, 0.03) : textDim(), NSTextAlignmentCenter,
            selected ? NSFontWeightSemibold : NSFontWeightRegular);
+}
+
+// One fader row: label, a track filled up to the knob, the knob, and the percentage
+// readout.
+- (void)drawFaderRow:(int)slot value:(double)v
+{
+  const NSRect t = velTrackRect(slot, [self bounds].size.width);
+  const CGFloat y = kVelRowY[slot];
+
+  drawText([NSString stringWithUTF8String:kVelNames[kVelDisplayOrder[slot]]],
+           NSMakeRect(panelX(2) + kPanelPad, y + (kVelRowH - 14) / 2, kVelLabelW, 14), 9.5,
+           textFaint(), NSTextAlignmentRight, NSFontWeightSemibold);
+
+  NSBezierPath *track = [NSBezierPath bezierPathWithRoundedRect:t xRadius:4 yRadius:4];
+  [trackBg() setFill];
+  [track fill];
+  [lineSoft() setStroke];
+  [track setLineWidth:1];
+  [track stroke];
+
+  const double frac = std::max(0.0, std::min(1.0, v / 2.0));
+  if (frac > 0.0)
+  {
+    NSGraphicsContext *context = [NSGraphicsContext currentContext];
+    [context saveGraphicsState];
+    [[NSBezierPath bezierPathWithRoundedRect:
+             NSMakeRect(t.origin.x, t.origin.y, frac * t.size.width, t.size.height)
+             xRadius:3 yRadius:3]
+        addClip];
+    [accent() setFill];
+    NSRectFill(t);
+    [context restoreGraphicsState];
+  }
+
+  const CGFloat cx = t.origin.x + frac * t.size.width;
+  NSRect knob = NSMakeRect(cx - 6, y, 12, kVelRowH);
+  NSBezierPath *knobPath = [NSBezierPath bezierPathWithRoundedRect:knob xRadius:3 yRadius:3];
+  [gray(0.93) setFill];
+  [knobPath fill];
+  [gray(0.56) setStroke];
+  [knobPath setLineWidth:1];
+  [knobPath stroke];
+  [gray(0.53) setFill];
+  NSRectFill(NSMakeRect(cx - 0.5, NSMidY(knob) - 6, 1, 12));
+
+  drawText([NSString stringWithFormat:@"%.0f%%", v * 100.0],
+           NSMakeRect(NSMaxX(t) + 8, y + (kVelRowH - 14) / 2, kVelValueW, 14), 10.5, textLit(),
+           NSTextAlignmentRight, NSFontWeightSemibold);
+}
+
+// One zone stepper: [ LABEL @ | < | value | > ].
+- (void)drawZoneStepper:(NSRect)r label:(NSString *)label labelColor:(NSColor *)color
+                  value:(NSString *)value
+{
+  NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:r xRadius:8 yRadius:8];
+  [panelBg() setFill];
+  [path fill];
+  [lineSoft() setStroke];
+  [path setLineWidth:1];
+  [path stroke];
+
+  drawText(label, NSMakeRect(r.origin.x + 12, NSMidY(r) - 7, kZoneLabelW, 14), 9.5, color,
+           NSTextAlignmentLeft, NSFontWeightSemibold);
+
+  // The separators between label / buttons / value.
+  [lineSoft() setFill];
+  const CGFloat leftBtn = r.origin.x + kZoneLabelW;
+  const CGFloat rightBtn = NSMaxX(r) - kZoneBtnW;
+  NSRectFill(NSMakeRect(leftBtn, r.origin.y + 8, 1, r.size.height - 16));
+  NSRectFill(NSMakeRect(rightBtn, r.origin.y + 8, 1, r.size.height - 16));
+
+  drawText(@"\u2039", NSMakeRect(leftBtn, NSMidY(r) - 8, kZoneBtnW, 16), 13, textDim(),
+           NSTextAlignmentCenter, NSFontWeightSemibold);
+  drawText(@"\u203a", NSMakeRect(rightBtn, NSMidY(r) - 8, kZoneBtnW, 16), 13, textDim(),
+           NSTextAlignmentCenter, NSFontWeightSemibold);
+  drawText(value, NSMakeRect(leftBtn + kZoneBtnW, NSMidY(r) - 8, kZoneValueW, 16), 12.5,
+           textLit(), NSTextAlignmentCenter, NSFontWeightSemibold);
 }
 
 // The fill for one key: notes generated by the trigger read out in the trigger zone's
@@ -604,21 +724,6 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
   }
 }
 
-// A value with an arrow either side: click the arrows to step it.
-- (void)drawStepper:(NSRect)r label:(NSString *)label
-{
-  [gray(0.22) setFill];
-  NSRectFill(r);
-  [gray(0.32) setFill];
-  NSFrameRect(r);
-  drawText(@"◀", NSMakeRect(r.origin.x + 6, NSMidY(r) - 7, 14, 14), 9.5, gray(0.75),
-           NSTextAlignmentLeft);
-  drawText(@"▶", NSMakeRect(NSMaxX(r) - 20, NSMidY(r) - 7, 14, 14), 9.5, gray(0.75),
-           NSTextAlignmentRight);
-  drawText(label, NSMakeRect(r.origin.x, NSMidY(r) - 7, r.size.width, 14), 9.5, gray(0.85),
-           NSTextAlignmentCenter, NSFontWeightSemibold);
-}
-
 - (void)drawRect:(NSRect)dirty
 {
   (void)dirty;
@@ -632,7 +737,7 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
   // readouts that describe one go quiet.
   const bool anyHeld = (_lastDrawn.heldControl[0] | _lastDrawn.heldControl[1]) != 0;
 
-  [gray(0.13) setFill];
+  [viewBg() setFill];
   NSRectFill([self bounds]);
 
   // Header: the scale currently in force, and whether a chord is being played.
@@ -656,41 +761,25 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
 
   drawText(holding ? @"playing" : @"ready",
            NSMakeRect([self bounds].size.width - kPad - 200, 18, 200, 18), 11,
-           holding ? accent() : gray(0.42), NSTextAlignmentRight);
+           holding ? greenLit() : gray(0.42), NSTextAlignmentRight);
 
-  // Voicing row: the only selectable stacking right now.
-  drawText(@"VOICING", NSMakeRect(kPad, kVoicingRowY + 9, kLabelWidth, 14), 9.5, gray(0.45),
-           NSTextAlignmentLeft, NSFontWeightSemibold);
+  // ---- The three panels. ----
+
+  [self drawPanel:NSMakeRect(panelX(0), kPanelY, kPanelW, kPanelH) title:@"VOICING"];
+  [self drawPanel:NSMakeRect(panelX(1), kPanelY, kPanelW, kPanelH) title:@"BORROWING"];
+  [self drawPanel:NSMakeRect(panelX(2), kPanelY, kPanelW, kPanelH) title:@"NOTE VELOCITY"];
+
+  // Voicing: the 2x2 grid.
+  static const char *kVoicingLabels[4] = {"Close", "Drop 2", "Drop 3", "Drop 2&4"};
   for (int i = 0; i < static_cast<int>(VoicingType::Count); ++i)
-    [self drawButton:voicingButtonRect(i, [self bounds].size.width)
-               title:[NSString stringWithUTF8String:voicingTypeName(
-                          static_cast<VoicingType>(i))]
-            selected:i == _lastDrawn.voicing
-               inert:NO];
+    [self drawSegButton:voicingButtonRect(i, [self bounds].size.width)
+                  title:[NSString stringWithUTF8String:kVoicingLabels[i]]
+               selected:i == _lastDrawn.voicing
+                  green:NO];
 
-  // Borrow rows: each of the top three voices, Prev / None / Next.
-  static const char *kBorrowRowLabels[3] = {"BORROW TOP", "BORROW 2ND", "BORROW 3RD"};
-  static const CGFloat kRowY[3] = {kBorrowTopRowY, kBorrowSecondRowY, kBorrowThirdRowY};
-  const int kBorrowRowValues[3] = {_lastDrawn.borrowTop, _lastDrawn.borrowSecond,
-                                   _lastDrawn.borrowThird};
-  for (int row = 0; row < 3; ++row)
-  {
-    const int value = kBorrowRowValues[row];
-    drawText([NSString stringWithUTF8String:kBorrowRowLabels[row]],
-             NSMakeRect(kPad, kRowY[row] + 9, kBorrowLabelWidth, 14), 9.5, gray(0.45),
-             NSTextAlignmentLeft, NSFontWeightSemibold);
-    for (int slot = 0; slot < 3; ++slot)
-    {
-      const int dir = kBorrowDisplayOrder[slot];
-      [self drawBorrowButton:borrowButtonRect(row, slot, [self bounds].size.width)
-                         dir:dir
-                    selected:dir == value];
-    }
-  }
-
-  // Contrary motion row: a single on/off toggle switch.
-  drawText(@"CONTRARY", NSMakeRect(kPad, kContraryRowY + 9, kLabelWidth, 14), 9.5,
-           gray(0.45), NSTextAlignmentLeft, NSFontWeightSemibold);
+  // The divider, then the contrary-motion toggle with its label to the right.
+  [lineSoft() setFill];
+  NSRectFill(NSMakeRect(panelX(0) + kPanelPad, kPanelY + 134, kInnerW, 1));
   {
     const NSRect r = contraryToggleRect([self bounds].size.width);
     const bool on = _lastDrawn.contraryMotion != 0;
@@ -700,9 +789,9 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
                                           yRadius:r.size.height / 2];
     // NB: after attributed text drawing the context's stroke color is left as the
     // text color, so set the stroke explicitly rather than relying on the fill.
-    [on ? accent() : gray(0.30) setFill];
+    [on ? violetFill() : rgb(0.227, 0.231, 0.251) setFill];
     [track fill];
-    [gray(0.10) setStroke];
+    [on ? violetDark() : rgb(0.275, 0.278, 0.302) setStroke];
     [track setLineWidth:1];
     [track stroke];
 
@@ -713,60 +802,84 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
     [gray(on ? 1.0 : 0.85) setFill];
     [knob fill];
 
-    // A small readout in the space the knob vacates.
-    const CGFloat freeW = r.size.width - (d + 4);
-    if (on)
-      drawText(@"Off", NSMakeRect(r.origin.x + 2, NSMidY(r) - 7, freeW, 14), 9.5, gray(0.62),
-               NSTextAlignmentCenter);
-    else
-      drawText(@"On", NSMakeRect(r.origin.x + d + 2, NSMidY(r) - 7, freeW, 14), 9.5,
-               gray(0.72), NSTextAlignmentCenter);
+    drawText(@"Contrary motion", NSMakeRect(NSMaxX(r) + 10, NSMidY(r) - 8, 140, 16), 11.5,
+             textDim(), NSTextAlignmentLeft);
   }
 
-  // Velocity row: the percentage of the trigger note's velocity for each note one
-  // trigger generates -- the contrary note first, then the chord notes low to high.
-  drawText(@"VELOCITY", NSMakeRect(kPad, kVelocityRowY + 9, kLabelWidth, 14), 9.5,
-           gray(0.45), NSTextAlignmentLeft, NSFontWeightSemibold);
+  // Borrowing: the header row, then the 3x3 matrix.
   {
-    for (int slot = 0; slot < kVelStepperCount; ++slot)
+    static const char *kBorrowColHead[3] = {"\u25c0 PREV", "NONE", "NEXT \u25b6"};
+    static const char *kBorrowRowLabels[3] = {"Top", "2nd", "3rd"};
+    const int kBorrowRowValues[3] = {_lastDrawn.borrowTop, _lastDrawn.borrowSecond,
+                                     _lastDrawn.borrowThird};
+    for (int slot = 0; slot < 3; ++slot)
+      drawText([NSString stringWithUTF8String:kBorrowColHead[slot]],
+               NSMakeRect(borrowColX(slot), kBorrowHeadY, borrowColWidth(), 12), 8.5,
+               textFaint(), NSTextAlignmentCenter, NSFontWeightSemibold);
+    for (int row = 0; row < 3; ++row)
     {
-      const int i = kVelDisplayOrder[slot];
-      const NSString *label = [NSString stringWithFormat:@"%@ %.0f%%",
-                               [NSString stringWithUTF8String:kVelNames[i]],
-                               _lastDrawn.vel[i] * 100.0];
-      [self drawStepper:velStepperRect(slot, [self bounds].size.width) label:(NSString *)label];
+      const int value = kBorrowRowValues[row];
+      drawText([NSString stringWithUTF8String:kBorrowRowLabels[row]],
+               NSMakeRect(panelX(1) + kPanelPad, kBorrowRow0Y + row * kBorrowRowStep +
+                                          (kBtnH - 14) / 2,
+                          kBorrowLabelW - 4, 14), 11, textDim(), NSTextAlignmentRight);
+      for (int slot = 0; slot < 3; ++slot)
+      {
+        const int dir = kBorrowSlotDirs[slot];
+        // None renders as a dash, like the mockup.
+        NSString *title = dir == static_cast<int>(BorrowDir::None)
+                              ? @"\u2014"
+                              : [NSString stringWithUTF8String:borrowDirName(
+                                     static_cast<BorrowDir>(dir))];
+        [self drawSegButton:borrowButtonRect(row, slot, [self bounds].size.width)
+                       title:title
+                    selected:dir == value
+                       green:dir != static_cast<int>(BorrowDir::None)];
+      }
     }
   }
 
-  // Keyboard: the single 88-key board with the control and trigger zones tinted.
-  drawText(@"KEYBOARD", NSMakeRect(kPad, kKeyboardLabelY, 400, 14), 9.5, gray(0.45),
-           NSTextAlignmentLeft, NSFontWeightSemibold);
-  [self drawStepper:triggerStartStepperRect([self bounds].size.width)
-              label:[NSString stringWithFormat:@"TRIGGER @ %@", noteName(_lastDrawn.triggerStart)]];
-  [self drawStepper:controlRootStepperRect([self bounds].size.width)
-              label:[NSString stringWithFormat:@"CONTROL @ %@", noteName(_lastDrawn.controlRoot)]];
+  // Note velocity: four faders, a divider, then the contrary fader.
+  {
+    [lineSoft() setFill];
+    NSRectFill(NSMakeRect(panelX(2) + kPanelPad, kPanelY + 152, kInnerW, 1));
+    for (int slot = 0; slot < kVelStepperCount; ++slot)
+      [self drawFaderRow:slot value:_lastDrawn.vel[kVelDisplayOrder[slot]]];
+  }
+
+  // ---- Zone steppers. ----
+  [self drawZoneStepper:controlRootStepperRect([self bounds].size.width)
+                 label:@"CONTROL @" labelColor:greenLit()
+                 value:noteName(_lastDrawn.controlRoot)];
+  [self drawZoneStepper:triggerStartStepperRect([self bounds].size.width)
+                 label:@"TRIGGER @" labelColor:accent()
+                 value:noteName(_lastDrawn.triggerStart)];
+
+  // ---- Keyboard: the single 88-key board with the control and trigger zones. ----
   [self drawKeyboardInRect:keyboardRect([self bounds].size.width)
                        low:kKeyboardLow
                       high:kKeyboardHigh];
 }
 
-// Steps a zone stepper: the left third moves it down, the right third up, the middle is
-// just the readout.
-- (int)stepZoneAt:(NSPoint)p rect:(NSRect)r current:(int)current low:(int)low high:(int)high
+// Sets a fader to the position the pointer is at, snapped to the 5% step and the
+// parameter's 0..2 range.
+- (void)velSetFromPoint:(NSPoint)p slot:(int)slot
 {
-  const double third = r.size.width / 3;
-  if (p.x < r.origin.x + third)
-    return current - 1;
-  if (p.x > NSMaxX(r) - third)
-    return current + 1;
-  return current;
+  const NSRect t = velTrackRect(slot, [self bounds].size.width);
+  double frac = (p.x - t.origin.x) / t.size.width;
+  frac = std::max(0.0, std::min(1.0, frac));
+  const double value = std::round(frac * 2.0 / 0.05) * 0.05;
+  _state->request(velRequest(kVelDisplayOrder[slot]), value);
 }
 
-// Return -- and a click away, which ends the field's edit -- commit the typed value.
-- (void)controlTextDidEndEditing:(NSControl *)control
+// What a zone stepper's click does: -1 down, +1 up, 0 just the readout.
+- (int)zoneStepAt:(NSPoint)p rect:(NSRect)r
 {
-  (void)control;
-  [self endVelEdit];
+  const CGFloat leftBtn = r.origin.x + kZoneLabelW;
+  const CGFloat rightBtn = NSMaxX(r) - kZoneBtnW;
+  if (p.x >= leftBtn && p.x < leftBtn + kZoneBtnW) return -1;
+  if (p.x >= rightBtn) return +1;
+  return 0;
 }
 
 - (void)mouseDown:(NSEvent *)event
@@ -774,12 +887,7 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
   const NSPoint p = [self convertPoint:[event locationInWindow] fromView:nil];
   const CGFloat viewWidth = [self bounds].size.width;
 
-  // If the inline editor is up and the click lands outside it, end the edit first:
-  // the click away commits the typed value, then the click itself is handled as usual.
-  if (_velField && !NSPointInRect(p, [_velField frame])) [self endVelEdit];
-
-  // The voicing row and the borrow rows are clickable; the scale itself is a readout,
-  // since the held control notes decide it.
+  // The voicing grid.
   {
     const int count = static_cast<int>(VoicingType::Count);
     for (int i = 0; i < count; ++i)
@@ -793,6 +901,7 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
     }
   }
 
+  // The borrow matrix.
   {
     static const GuiState::Request kBorrowRowRequests[3] = {GuiState::Request::BorrowTop,
                                                             GuiState::Request::BorrowSecond,
@@ -802,13 +911,14 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
       {
         if (NSPointInRect(p, borrowButtonRect(row, slot, viewWidth)))
         {
-          _state->request(kBorrowRowRequests[row], kBorrowDisplayOrder[slot]);
+          _state->request(kBorrowRowRequests[row], kBorrowSlotDirs[slot]);
           [self setNeedsDisplay:YES];
           return;
         }
       }
   }
 
+  // The contrary motion switch.
   {
     const NSRect r = contraryToggleRect(viewWidth);
     if (NSPointInRect(p, r))
@@ -820,42 +930,31 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
     }
   }
 
+  // The velocity faders: click or drag sets, a double-click resets the note to 100%.
   {
     for (int slot = 0; slot < kVelStepperCount; ++slot)
     {
-      const int i = kVelDisplayOrder[slot];
-      const NSRect r = velStepperRect(slot, viewWidth);
-      if (!NSPointInRect(p, r)) continue;
+      if (!NSPointInRect(p, velRowRect(slot, viewWidth))) continue;
 
-      // The left third steps down 5%, the right third up, the middle is the readout --
-      // and takes direct number input: click it to type the percentage.
-      const double current = velValue(_state, i)->load(std::memory_order_relaxed);
-      const double third = r.size.width / 3;
-      if (p.x >= r.origin.x + third && p.x <= NSMaxX(r) - third)
+      if ([event clickCount] >= 2)
+        _state->request(velRequest(kVelDisplayOrder[slot]), 1.0);
+      else
       {
-        [self beginVelEdit:i];
-        return;
+        [self velSetFromPoint:p slot:slot];
+        _velDragIndex = slot;
       }
-      double next = current;
-      if (p.x < r.origin.x + third) next = current - 0.05;
-      if (p.x > NSMaxX(r) - third) next = current + 0.05;
-
-      // Snap to the step and stay on the parameter's 0..2 range.
-      next = std::round(next / 0.05) * 0.05;
-      if (next < 0.0) next = 0.0;
-      if (next > 2.0) next = 2.0;
-      _state->request(velRequest(i), next);
       [self setNeedsDisplay:YES];
       return;
     }
   }
 
+  // The zone steppers.
   {
     const NSRect r = triggerStartStepperRect(viewWidth);
-    if (NSPointInRect(p, r))
+    const int step = [self zoneStepAt:p rect:r];
+    if (step != 0 && NSPointInRect(p, r))
     {
-      int start = _state->triggerStart.load(std::memory_order_relaxed);
-      start = [self stepZoneAt:p rect:r current:start low:0 high:127];
+      int start = _state->triggerStart.load(std::memory_order_relaxed) + step;
       if (start < 0) start = 127;
       if (start > 127) start = 0;
       _state->request(GuiState::Request::TriggerStart, start);
@@ -866,10 +965,10 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
 
   {
     const NSRect r = controlRootStepperRect(viewWidth);
-    if (NSPointInRect(p, r))
+    const int step = [self zoneStepAt:p rect:r];
+    if (step != 0 && NSPointInRect(p, r))
     {
-      int root = _state->controlRoot.load(std::memory_order_relaxed);
-      root = [self stepZoneAt:p rect:r current:root low:0 high:115];
+      int root = _state->controlRoot.load(std::memory_order_relaxed) + step;
       if (root < 0) root = 115;
       if (root > 115) root = 0;
       _state->request(GuiState::Request::ControlRoot, root);
@@ -877,6 +976,20 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
       return;
     }
   }
+}
+
+- (void)mouseDragged:(NSEvent *)event
+{
+  if (_velDragIndex < 0) return;
+  const NSPoint p = [self convertPoint:[event locationInWindow] fromView:nil];
+  [self velSetFromPoint:p slot:_velDragIndex];
+  [self setNeedsDisplay:YES];
+}
+
+- (void)mouseUp:(NSEvent *)event
+{
+  (void)event;
+  _velDragIndex = -1;
 }
 
 @end
@@ -946,7 +1059,8 @@ ViewRect guiBorrowButtonRect(int row, int index, double viewWidth)
   // Prev | None | Next.
   if (row < 0 || row > 2) return {};
   if (index < 0 || index >= static_cast<int>(BorrowDir::Count)) return {};
-  const int slot = index == 0 ? 1 : index;
+  const int slot = index == static_cast<int>(BorrowDir::Prev) ? 0
+                      : index == static_cast<int>(BorrowDir::None) ? 1 : 2;
   const NSRect r = borrowButtonRect(row, slot, viewWidth);
   return {r.origin.x, r.origin.y, r.size.width, r.size.height};
 }
@@ -960,11 +1074,11 @@ ViewRect guiContraryToggleRect(double viewWidth)
 ViewRect guiVelStepperRect(int index, double viewWidth)
 {
   // The index is the note (0 bottom, 1 second, 2 third, 3 top, 4 contrary), not the
-  // display slot: the slots read CONTR. | BOTTOM | 2ND | 3RD | TOP.
+  // display slot: the slots read TOP | 3RD | 2ND | BOTTOM | CONTRARY.
   if (index < 0 || index >= kVelStepperCount) return {};
   int slot = 0;
   while (slot < kVelStepperCount && kVelDisplayOrder[slot] != index) ++slot;
-  const NSRect r = velStepperRect(slot, viewWidth);
+  const NSRect r = velTrackRect(slot, viewWidth);
   return {r.origin.x, r.origin.y, r.size.width, r.size.height};
 }
 
