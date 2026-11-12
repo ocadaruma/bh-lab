@@ -436,7 +436,7 @@ int contraryNote(const ScaleSelection &sel, int sessionKey, int bottomKey, int p
     return -1;
   if (pressKey <= sessionKey) return -1;
 
-  const uint16_t pcs = scalePitchClasses(sel.family);
+  const uint16_t pcs = rotateMask(scalePitchClasses(sel.family), sel.keyPc);
   auto inScale = [&](int key) { return (pcs >> (key % 12)) & 1u; };
   if (!inScale(sessionKey) || !inScale(pressKey)) return -1;
 

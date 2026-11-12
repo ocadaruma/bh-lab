@@ -373,6 +373,19 @@ int main()
     expectTrue("contrary: follows the scale (minor 6th)", contraryNote(am6, 81, 72, 84) == 69);
   }
 
+  // The walk also follows the selection's key, not the family's C-rooted scale:
+  // D major 6th (D E F# G A Bb B C), D4's stack is F#3 A3 B3 D4, bottom F#3.
+  // D4 -> E4 is one scale step; one step down from F#3 in THIS scale is E3 (F is
+  // out of the D scale, even though it is in the C-rooted one).
+  const ScaleSelection d6 = {ScaleFamily::Major6, 2};
+  {
+    expectTrue("contrary: follows the key (D major 6th, E4)", contraryNote(d6, 62, 54, 64) == 52);
+    // D4 -> G4 is three scale steps (D, E, F#, G): three down from F#3 is E3, D3, C2.
+    expectTrue("contrary: follows the key (D major 6th, G4)", contraryNote(d6, 62, 54, 67) == 49);
+    // F is out of the D scale: no contrary note.
+    expectTrue("contrary: out-of-scale press (D major 6th, F4)", contraryNote(d6, 62, 54, 65) == -1);
+  }
+
   if (failures)
   {
     printf("\n%d test(s) failed\n", failures);
