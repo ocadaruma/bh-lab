@@ -21,10 +21,12 @@ An Audio Unit note effect based on **Barry Harris's stacked diminished scales**
   with the top voice borrowed from the next chord, C major 6th with B on top sounds
   C E G B instead of D F Ab B. While a chord triggered with a borrow switch on is held,
   keys below its top note do not trigger: pressing one of its own un-borrowed top notes
-  releases the borrowed notes and sounds the originals instead, and any other note
-  below the top (in-scale or not) passes through untouched. Releasing the original
-  trigger key while a cancel note is still held transfers the chord to that note, which
-  then owns it; a key release never re-triggers notes.
+  reverts the borrowing in place -- the chord becomes the un-borrowed stack at the
+  octave it was triggered, no matter where the cancel note was struck -- and any other
+  note below the top (in-scale or not) passes through untouched. A cancel note works
+  from any zone, including the control octave and below the trigger zone. Releasing the
+  original trigger key while a cancel note is still held transfers the chord to that
+  note, which then owns it; a key release never re-triggers notes.
 
 Parameters (automatable):
 

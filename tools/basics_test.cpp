@@ -799,7 +799,9 @@ int main()
 
   // Suppression does not depend on the top being borrowed: with any borrow switch on,
   // keys below the top pass through. D4 is the borrowed 3rd-top note itself, so it is
-  // not a cancel and does not trigger a chord either.
+  // not a cancel and does not trigger a chord either. The chord already sounds D4, so
+  // the press also takes a claim on that shared voice: its release drops the claim
+  // while the forwarded note-off goes through.
   g_emitted.clear();
   {
     InputEvents press;
@@ -979,6 +981,274 @@ int main()
       if (!e.on) ++offs;
     expect("the pass-through off plus releasing B4 stops E4 G4 A4 (4 offs)", offs == 4,
            describe(g_emitted));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 48, 0.0);
+    timeline.run(&release);
+  }
+  expect("the control release is silent", g_emitted.empty(), describe(g_emitted));
+
+  // --- borrowing: a pass-through press of a chord note survives the chord --------------
+  // With the top and second borrowed from the next, B4 sounds C4 E4 Ab4 B4. Pressing E4
+  // while it is held does not re-sound the note: the press joins the chord's shared
+  // voice, so releasing the trigger key cannot stop a note the press still holds, and
+  // the note dies only with the press.
+  reset(plugin, &timeline);
+  {
+    InputEvents setup;
+    setup.addParam(kBorrowTop, 2);     // Next
+    setup.addParam(kBorrowSecond, 2);  // Next
+    timeline.run(&setup);
+  }
+  holdControl(&timeline, {48});
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 71, 0.8);  // B4 -> C4 E4 Ab4 B4
+    timeline.run(&press);
+  }
+  g_emitted.clear();
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 64, 0.8);  // E4, already sounded by the chord
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool passed = first.size() == 1 && first[0].on && first[0].key == 64;
+    expect("E4 below the borrowed top passes through (and joins the chord's voice)",
+           passed, describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 71, 0.0);  // B4, the trigger key
+    timeline.run(&release);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool e4Kept = first.size() == 3 && !first[0].on && !first[1].on && !first[2].on &&
+                        first[0].key != 64 && first[1].key != 64 && first[2].key != 64;
+    expect("releasing B4 keeps E4 sounding while the press is held", e4Kept,
+           describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 64, 0.0);  // E4, the press
+    timeline.run(&release);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool e4Off = first.size() == 2 && !first[0].on && !first[1].on &&
+                       first[0].key == 64 && first[1].key == 64;
+    expect("releasing the E4 press stops the note", e4Off, describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 48, 0.0);
+    timeline.run(&release);
+  }
+  expect("the control release is silent", g_emitted.empty(), describe(g_emitted));
+
+  // The other order: the press predates the chord. In pass-through mode E4 sounds as a
+  // plain note; when the control octave is held and B4 is triggered, the chord claims
+  // the note the press already sounds instead of re-sounding it, and the press's
+  // release stops it even though the chord still holds it.
+  reset(plugin, &timeline);
+  {
+    InputEvents setup;
+    setup.addParam(kBorrowTop, 2);     // Next
+    setup.addParam(kBorrowSecond, 2);  // Next
+    timeline.run(&setup);
+  }
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 64, 0.8);  // E4, nothing held in control
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool passed = first.size() == 1 && first[0].on && first[0].key == 64;
+    expect("E4 passes through in pass-through mode", passed, describe(first));
+  }
+  holdControl(&timeline, {48});
+  g_emitted.clear();
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 71, 0.8);  // B4 -> C4 E4 Ab4 B4
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool noDup = first.size() == 3 && first[0].key == 60 && first[1].key == 68 &&
+                       first[2].key == 71;
+    expect("B4 claims the E4 the press already sounds (no duplicate note)", noDup,
+           describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 64, 0.0);  // E4, the press
+    timeline.run(&release);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool e4Off = first.size() == 1 && !first[0].on && first[0].key == 64;
+    expect("releasing the E4 press stops the note while B4 is held", e4Off,
+           describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 71, 0.0);  // B4
+    timeline.run(&release);
+  }
+  {
+    int offs = 0;
+    for (const auto &e : g_emitted)
+      if (!e.on) ++offs;
+    expect("releasing B4 stops C4 Ab4 B4 (3 offs, E4 already gone)", offs == 3,
+           describe(g_emitted));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 48, 0.0);
+    timeline.run(&release);
+  }
+  expect("the control release is silent", g_emitted.empty(), describe(g_emitted));
+
+  // --- borrowing: the revert keeps the chord's octave -----------------------------------
+  // The override is in place: the chord reverts to its un-borrowed stack at the octave
+  // it was triggered, no matter where the cancel note was struck. Trigger B5 (C5 E5
+  // Ab5 B5) and press A4: the revert lands G5 A5 in place, not an octave below.
+  reset(plugin, &timeline);
+  {
+    InputEvents setup;
+    setup.addParam(kBorrowTop, 2);     // Next
+    setup.addParam(kBorrowSecond, 2);  // Next
+    timeline.run(&setup);
+  }
+  holdControl(&timeline, {48});
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 83, 0.8);  // B5 -> C5 E5 Ab5 B5
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool borrowed = first.size() == 4 && first[0].key == 72 && first[1].key == 76 &&
+                          first[2].key == 80 && first[3].key == 83;
+    expect("borrowed chord sounds C5 E5 Ab5 B5", borrowed, describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 69, 0.8);  // A4, the un-borrowed top
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool reverted = first.size() == 4 && !first[0].on && first[0].key == 80 &&
+                          !first[1].on && first[1].key == 83 && first[2].on &&
+                          first[2].key == 79 && first[3].on && first[3].key == 81;
+    expect("A4 reverts the borrow in place (Ab5 B5 off, G5 A5 on; C5 E5 stay)", reverted,
+           describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 69, 0.0);  // A4
+    timeline.run(&release);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool restored = first.size() == 2 && !first[0].on && !first[1].on &&
+                          first[0].key == 79 && first[1].key == 81;
+    expect("releasing A4 goes quiet (G5 A5 off, C5 E5 stay silent)", restored,
+           describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 83, 0.0);  // B5
+    timeline.run(&release);
+  }
+  {
+    int offs = 0;
+    for (const auto &e : g_emitted)
+      if (!e.on) ++offs;
+    expect("releasing B5 stops C5 E5 (2 offs)", offs == 2, describe(g_emitted));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 48, 0.0);
+    timeline.run(&release);
+  }
+  expect("the control release is silent", g_emitted.empty(), describe(g_emitted));
+
+  // --- borrowing: the cancel note works from the control zone ------------------------
+  // A3 sits in the control octave (C2 root), below the trigger zone. It still cancels
+  // the held borrowed chord: the revert is in place, and the press is consumed -- it
+  // neither identifies the scale nor sounds.
+  reset(plugin, &timeline);
+  {
+    InputEvents setup;
+    setup.addParam(kBorrowTop, 2);  // Next
+    timeline.run(&setup);
+  }
+  holdControl(&timeline, {48});
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 71, 0.8);  // B4 -> C4 E4 G4 B4
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool borrowed = first.size() == 4 && first[0].key == 60 && first[1].key == 64 &&
+                          first[2].key == 67 && first[3].key == 71;
+    expect("borrowed chord sounds C4 E4 G4 B4", borrowed, describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 57, 0.8);  // A3, the un-borrowed top, in C2
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool reverted = first.size() == 2 && !first[0].on && first[0].key == 71 &&
+                          first[1].on && first[1].key == 69;
+    expect("A3 in the control zone reverts the borrow in place (B4 off, A4 on)", reverted,
+           describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 57, 0.0);  // A3
+    timeline.run(&release);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool restored = first.size() == 1 && !first[0].on && first[0].key == 69;
+    expect("releasing A3 goes quiet (A4 off, C4 E4 G4 stay silent)", restored,
+           describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 71, 0.0);  // B4
+    timeline.run(&release);
+  }
+  {
+    int offs = 0;
+    for (const auto &e : g_emitted)
+      if (!e.on) ++offs;
+    expect("releasing B4 stops C4 E4 G4 (3 offs)", offs == 3, describe(g_emitted));
   }
   g_emitted.clear();
   {

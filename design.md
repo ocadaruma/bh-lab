@@ -83,6 +83,8 @@ Based on Barry Harris's diminished scale, the plugin triggers a chord
     * But if we set "borrow top note from next", C E G B will be triggered instead of D F Ab B
   * Also, when any borrow switch is changed, trigger-zone behavior changes a bit:
     * When any borrow switch is set and borrowed not is pressed, if (below-top) non borrow note is additionally pressed, all (already triggered) borrowed notes will be released, and the chord will be triggered with the non-borrow notes instead
+    * The revert is in place: the chord becomes the un-borrowed stack at the octave it was triggered, no matter where the cancel note was struck
+    * The cancel note works from any zone, including the control octave and below the trigger zone
     * e.g. Assume C major 6th diminished scale, and close voicing
       - If we set "borrow top and 2nd-top notes from next", and press B, it will trigger C E Ab B first
       - In the middle of holding B, if we additionally press A, it will release Ab B, and trigger G and A instead

@@ -472,7 +472,10 @@ VoicePoolEntry *findPooledVoice(Bhl *rc, int16_t channel, int16_t key)
 
 // Claims the shared voice for (channel, key). A note-on is pushed only when the voice
 // is newly created; an already-sounding note is reused untouched, so the downstream
-// instrument is not re-triggered on a key it already holds.
+// instrument is not re-triggered on a key it already holds. When a forwarded press is
+// holding the key, the note is already sounding downstream: the new voice claims it
+// (its own ref plus one per press) without re-sounding, so the single note-out when
+// the last claim goes is enough to stop it.
 int32_t acquireVoice(Bhl *rc, const clap_output_events_t *out, uint32_t time, int16_t channel,
                      int16_t key, double velocity)
 {
@@ -492,14 +495,26 @@ int32_t acquireVoice(Bhl *rc, const clap_output_events_t *out, uint32_t time, in
     v->noteId = -1;
     ++rc->voiceCount;
 
-    const int32_t noteId = rc->nextNoteId++;
-    if (rc->nextNoteId < 0) rc->nextNoteId = 0;
-    if (!pushNote(out, CLAP_EVENT_NOTE_ON, time, noteId, channel, key, velocity))
-      return -1;  // Never sounded, so it is not ours to release.
+    const int ch = channel < 0 ? 0 : (channel & 0xf);
+    if (rc->forwarded[ch][key] > 0)
+    {
+      // A forwarded press already sounds this key: join it rather than duplicating the
+      // note. In hosts that match note-offs by key, a duplicate note-on would die on
+      // the first of the two note-offs.
+      v->refs += rc->forwarded[ch][key];
+    }
+    else
+    {
+      const int32_t noteId = rc->nextNoteId++;
+      if (rc->nextNoteId < 0) rc->nextNoteId = 0;
+      if (!pushNote(out, CLAP_EVENT_NOTE_ON, time, noteId, channel, key, velocity))
+        return -1;  // Never sounded, so it is not ours to release.
 
-    v->noteId = noteId;
+      v->noteId = noteId;
+    }
+
     rc->gui.noteOn(key);
-    return noteId;
+    return v->noteId;
   }
 
   ++v->refs;
@@ -564,6 +579,21 @@ bool takeForwarded(Bhl *rc, int16_t channel, int16_t key)
     return true;
   }
   return false;
+}
+
+// Forwards a note-on unchanged. When a held chord is already sounding the key, the
+// press also takes a claim on that shared voice, so releasing the chord cannot stop
+// a note the press still holds; the press's own note-off still goes through as a
+// pass-through.
+void forwardNoteOn(Bhl *rc, const clap_output_events_t *out, const clap_event_header_t *hdr)
+{
+  const auto *n = reinterpret_cast<const clap_event_note_t *>(hdr);
+  if (n->channel >= 0 && n->key >= 0 && n->key <= 127)
+  {
+    VoicePoolEntry *v = findPooledVoice(rc, n->channel & 0xf, n->key);
+    if (v && v->refs < 127) ++v->refs;
+  }
+  if (passThrough(out, hdr)) markForwarded(rc, n->channel, n->key);
 }
 
 // Releases every chord matching (channel, key). Handles the wildcard channel and the
@@ -853,12 +883,12 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
     if (note->channel >= 0 && h.channel != note->channel) continue;
     if (note->key < h.key)
     {
-      if (passThrough(out, hdr)) markForwarded(rc, note->channel, note->key);
+      forwardNoteOn(rc, out, hdr);
       return;
     }
     if (h.topBorrowPrev)
     {
-      if (passThrough(out, hdr)) markForwarded(rc, note->channel, note->key);
+      forwardNoteOn(rc, out, hdr);
       return;
     }
   }
@@ -869,7 +899,7 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
   // A note outside the selected scale is passed through untouched.
   if (chord.count == 0)
   {
-    if (passThrough(out, hdr)) markForwarded(rc, note->channel, note->key);
+    forwardNoteOn(rc, out, hdr);
     return;
   }
 
@@ -937,7 +967,18 @@ void handleEvent(Bhl *rc, const clap_event_header_t *hdr, const clap_output_even
     case CLAP_EVENT_NOTE_ON:
     {
       const auto *note = reinterpret_cast<const clap_event_note_t *>(hdr);
-      switch (zoneOf(rc, note->key))
+
+      // A cancel note reverts a held borrowed chord from below the trigger zone as
+      // well: the pressed note's pitch class selects the revert, not its position on
+      // the keyboard. (Trigger-zone keys run the same check inside triggerChord.)
+      const Zone zone = zoneOf(rc, note->key);
+      if (zone != Zone::Trigger)
+      {
+        const ScaleSelection sel = decodeSelection(rc->selection.load(std::memory_order_relaxed));
+        if (undoBorrow(rc, sel, note, out)) break;
+      }
+
+      switch (zone)
       {
         case Zone::Control:
           handleControlKey(rc, note, true);  // Identifies the scale; never sounds.
@@ -947,14 +988,14 @@ void handleEvent(Bhl *rc, const clap_event_header_t *hdr, const clap_output_even
           // passes through untouched rather than sounding a latched scale's stack.
           if (rc->controlHeldKeys == 0)
           {
-            if (passThrough(out, hdr)) markForwarded(rc, note->channel, note->key);
+            forwardNoteOn(rc, out, hdr);
             break;
           }
           triggerChord(rc, note, hdr, out);
           break;
         case Zone::Below:
-          // Forwarded untouched, and remembered as forwarded if it went.
-          if (passThrough(out, hdr)) markForwarded(rc, note->channel, note->key);
+          // Forwarded untouched, and remembered if it went.
+          forwardNoteOn(rc, out, hdr);
           break;
       }
       break;
@@ -999,6 +1040,11 @@ void handleEvent(Bhl *rc, const clap_event_header_t *hdr, const clap_output_even
 
       if (takeForwarded(rc, note->channel, note->key))
       {
+        // The press sounded its own note, so its note-off goes through. The key may
+        // also be a held chord's shared voice: drop the press's claim on it, and the
+        // pool sends its off when it is last, if any.
+        if (note->channel >= 0) releaseVoice(rc, out, hdr->time, note->channel & 0xf,
+                                             note->key, note->velocity, outType);
         passThrough(out, hdr);
         break;
       }
@@ -1020,6 +1066,9 @@ void handleEvent(Bhl *rc, const clap_event_header_t *hdr, const clap_output_even
       }
       for (int i = 0; i < held->count; ++i)
       {
+        // A voice that joined a forwarded press never got its own note id, so there
+        // is nothing of it to address.
+        if (held->voices[i].noteId < 0) continue;
         clap_event_note_expression_t copy = *exp;
         copy.note_id = held->voices[i].noteId;
         copy.channel = held->channel;

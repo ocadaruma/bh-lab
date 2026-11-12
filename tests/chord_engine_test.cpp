@@ -284,6 +284,16 @@ int main()
   expectChord("override: A4 under B4 on degree 0",
               buildOverrideChord(c6, 0, 71, 69, VoicingType::Close),
               (const int[]){60, 64, 67, 69}, 4);
+  // The override is in place: a cancel note struck an octave away reverts the chord
+  // where it was triggered, not where the note was struck.
+  expectChord("override: A3 under B4 reverts in place",
+              buildOverrideChord(c6, 0, 71, 57, VoicingType::Close),
+              (const int[]){60, 64, 67, 69}, 4);
+  // Same for a prev-borrowed top: the un-borrowed top lands above the borrowed one,
+  // wherever the cancel note was struck.
+  expectChord("override: C4 over B4 on degree 2 reverts in place",
+              buildOverrideChord(c6, 2, 71, 60, VoicingType::Close),
+              (const int[]){64, 67, 69, 72}, 4);
   // Pressing the un-borrowed 2nd-top note (G4) under the borrowed top: G4 stays put, the
   // borrowed top B4 lands on A4.
   expectChord("override: G4 under B4 on degree 0",
@@ -310,8 +320,11 @@ int main()
   expectTrue("override: press at the trigger key reverts nothing",
              buildOverrideChord(c6, 2, 71, 71, VoicingType::Close).count == 0);
   // A middle un-borrowed voice above the trigger key is not a cancel note.
-  expectTrue("override: middle voice above the top reverts nothing",
-             buildOverrideChord(c6, 2, 71, 79, VoicingType::Close).count == 0);
+  // The engine does not judge the pressed note's position relative to the chord's top
+  // (the plugin does): it still reverts in place.
+  expectChord("override: in place even when the press is above the top",
+              buildOverrideChord(c6, 2, 71, 79, VoicingType::Close),
+              (const int[]){64, 67, 69, 72}, 4);
 
   if (failures)
   {

@@ -372,53 +372,35 @@ Chord buildOverrideChord(const ScaleSelection &sel, int degree, int triggerKey, 
   const int T = triggerKey % 12;
   const int l = pressKey % 12;
 
-  // The un-borrowed slot (1..3 from the root) the pressed note corresponds to.
+  // The pressed note selects the revert; it must be one of the degree's un-borrowed
+  // top-three voices. The chord itself is re-voiced in place, as the un-borrowed stack
+  // at the trigger key's octave: each voice sits where the borrowed form had it, and
+  // the top goes to the side of the trigger key the un-borrowed top belongs to (below
+  // for a next borrow, above for a previous one). The pressed key's own octave is not
+  // moved to -- the chord keeps the octave it was triggered in. When the press sits in
+  // that octave, its note is the chord's own voice.
   int pressedSlot = -1;
   for (int j = 1; j < kStackedChordNotes; ++j)
     if (u[j] % 12 == l) pressedSlot = j;
+  if (pressedSlot < 1) return chord;  // Not an un-borrowed voice of this degree.
 
   int voices[kStackedChordNotes] = {};
   int count = 0;
-
-  if (pressedSlot == kStackedChordNotes - 1)
+  for (int j = 0; j < kStackedChordNotes; ++j)
   {
-    // The pressed note is the un-borrowed top: it takes the top, the rest sit
-    // strictly below it. The un-borrowed top sits below the borrowed top when the top
-    // is borrowed from the next chord, above it when borrowed from the previous one;
-    // the stacking is the same either way.
-    voices[count++] = pressKey;
-    for (int j = 0; j < kStackedChordNotes - 1; ++j)
+    int key;
+    if (j == kStackedChordNotes - 1)
     {
-      const int key = pressKey - ((l - u[j] + 12) % 12);
-      if (key < 0 || key > 127) continue;
-      voices[count++] = key;
+      const int d = ((u[j] - T) % 12 + 12) % 12;
+      key = triggerKey + (d > 6 ? d - 12 : d);
     }
+    else if (u[j] % 12 == T)
+      key = triggerKey - 12;
+    else
+      key = triggerKey - ((T - u[j] + 12) % 12);
+    if (key < 0 || key > 127) continue;
+    voices[count++] = key;
   }
-  else if (pressedSlot > 0 && pressKey < triggerKey)
-  {
-    // The top stays where it was; the pressed note sits at its own key, and the other
-    // slots land where the same stack would with the top class on top. The un-borrowed
-    // top is one scale degree from the borrowed top's class, so it moves there.
-    for (int j = 0; j < kStackedChordNotes; ++j)
-    {
-      int key;
-      if (j == pressedSlot)
-        key = pressKey;
-      else if (j == kStackedChordNotes - 1)
-      {
-        int d = ((u[j] - T) % 12 + 12) % 12;
-        key = triggerKey + (d > 6 ? d - 12 : d);
-      }
-      else if (u[j] % 12 == T)
-        key = triggerKey - 12;
-      else
-        key = triggerKey - ((T - u[j] + 12) % 12);
-      if (key < 0 || key > 127) continue;
-      voices[count++] = key;
-    }
-  }
-  else
-    return chord;  // The pressed note is not an un-borrowed voice of this degree.
 
   applyDropVoicing(voices, count, voicing);
 
