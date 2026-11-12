@@ -306,7 +306,7 @@ void drawText(NSString *text, NSRect rect, CGFloat size, NSColor *color, NSTextA
   [style setLineBreakMode:NSLineBreakByTruncatingTail];
 
   NSDictionary *attrs = @{
-    NSFontAttributeName : [NSFont systemFontOfSize:size weight:weight],
+    NSFontAttributeName : [NSFont monospacedSystemFontOfSize:size weight:weight],
     NSForegroundColorAttributeName : color,
     NSParagraphStyleAttributeName : style
   };
