@@ -976,12 +976,14 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
   }
 
   // With contrary motion on, an in-scale press above the session key adds the
-  // session's contrary note to this chord. The session itself starts with the first
-  // in-scale trigger press and lives until its trigger key is released; presses
-  // above it add contrary notes against the original session rather than moving it,
-  // and the bottom note it walks from is that of the chord the session key
-  // triggered -- the dropped bottom in drop voicings, since the chord notes come out
-  // sorted -- at trigger time.
+  // session's contrary note to this chord, and the session's own chord yields: its
+  // notes go quiet, so the left hand moves down as the right hand moves up. The
+  // session itself starts with the first in-scale trigger press and lives until its
+  // trigger key is released; presses above it add contrary notes against the
+  // original session rather than moving it. The bottom note the contrary walk
+  // starts from is the bottom of the chord the session key triggered -- the
+  // dropped bottom in drop voicings, since the chord notes come out sorted -- at
+  // trigger time.
   if (contrary)
   {
     const int sessionKey = rc->contraryKey;
@@ -1005,6 +1007,15 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
       rc->contraryChannel = channel;
       rc->contraryKey = note->key;
       rc->contraryBottom = chord.notes[0];
+    }
+
+    // The session's chord releases after the new chord's claims are in place, so a
+    // note both chords share stays sounding (the new chord still owns it) rather than
+    // flicking off and on.
+    if (extraNote >= 0)
+    {
+      if (HeldChord *session = findHeld(rc, rc->contraryChannel, sessionKey))
+        releaseHeld(rc, session, out, note->header.time, session->velocity);
     }
   }
 

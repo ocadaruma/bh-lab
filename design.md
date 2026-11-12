@@ -92,11 +92,11 @@ Based on Barry Harris's diminished scale, the plugin triggers a chord
 ## Contrary motion
 - Contrary motion is a note movement where the right/left hands go in opposite directions: while the right hand moves up, the left hand moves down.
 - It is an on/off switch. When on, the borrow revert behavior (above) is disabled.
-- The first in-scale trigger-zone press starts a contrary-motion session, which lives until that key is released. While the session is held, in-scale presses above the session key trigger their own chord, plus an additional "contrary" note below:
+- The first in-scale trigger-zone press starts a contrary-motion session, which lives until that key is released. While the session is held, in-scale presses above the session key trigger their own chord, plus an additional "contrary" note below, and the session's original chord yields (its notes are released):
   * The offset is the number of scale steps between the session key and the pressed key
   * The contrary note is found by walking the scale down by that offset from the session chord's bottom note (its dropped bottom for drop voicings); walking the scale guarantees the contrary note is always in-scale
-  * The contrary note is released together with the pressed key, at the pressed key's velocity
-  * Out-of-scale presses pass through without a contrary note, and do not disturb the session
+  * The contrary note is released together with the pressed key, at the pressed key's velocity; the session itself keeps running against the original trigger key until it is released
+  * Out-of-scale presses pass through without a contrary note, and do not disturb the session or its chord
 - e.g. Assume C major 6th diminished scale, close voicing, no borrow
   - Press A => C4 E4 G4 A4 (the session starts; bottom note C4)
   - Press B while A is held => B3, plus B's own chord D4 F4 Ab4 B4 (A->B is one scale step; one step down from C4 is B)
