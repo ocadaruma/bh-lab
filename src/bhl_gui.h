@@ -24,6 +24,7 @@ struct GuiState
   std::atomic<int> borrowTop = {0};
   std::atomic<int> borrowSecond = {0};
   std::atomic<int> borrowThird = {0};
+  std::atomic<int> contraryMotion = {0};
   std::atomic<int> controlRoot = {48};
   std::atomic<int> triggerStart = {60};
 
@@ -38,7 +39,8 @@ struct GuiState
     TriggerStart,
     BorrowTop,
     BorrowSecond,
-    BorrowThird
+    BorrowThird,
+    ContraryMotion
   };
 
   struct PendingRequest
@@ -82,6 +84,9 @@ struct GuiState
         break;
       case Request::BorrowThird:
         borrowThird.store(static_cast<int>(value), std::memory_order_relaxed);
+        break;
+      case Request::ContraryMotion:
+        contraryMotion.store(static_cast<int>(value), std::memory_order_relaxed);
         break;
       case Request::ControlRoot:
         controlRoot.store(static_cast<int>(value), std::memory_order_relaxed);
@@ -190,6 +195,9 @@ ViewRect guiVoicingButtonRect(int index, double viewWidth);
 // Test support: a borrow row button. Row 0 is the top voice, 1 the second, 2 the third;
 // the index is the borrow direction (None, Prev, Next).
 ViewRect guiBorrowButtonRect(int row, int index, double viewWidth);
+
+// Test support: the contrary motion toggle, 0 = Off, 1 = On.
+ViewRect guiContraryButtonRect(int index, double viewWidth);
 
 // Platform view lifecycle. The returned handle is an NSView* on macOS.
 void *guiCreate(GuiState *state);

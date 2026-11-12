@@ -65,6 +65,7 @@ enum ParamId : clap_id
   kParamBorrowTop = 3,
   kParamBorrowSecond = 4,
   kParamBorrowThird = 5,
+  kParamContraryMotion = 6,
   kNumParams
 };
 
@@ -88,6 +89,7 @@ const ParamDef kParamDefs[kNumParams] = {
      true},
     {kParamBorrowThird, "Borrow 3rd", 0, static_cast<double>(BorrowDir::Count) - 1, 0,
      true},
+    {kParamContraryMotion, "Contrary Motion", 0, 1, 0, true},
 };
 
 static_assert(sizeof(kParamDefs) / sizeof(kParamDefs[0]) == kNumParams,
@@ -98,7 +100,8 @@ static_assert(sizeof(kParamDefs) / sizeof(kParamDefs[0]) == kNumParams,
 // never inserted. The old ids (quality, inversion) belonged to the abandoned chord
 // quality feature and are not reused.
 static_assert(kParamVoicing == 0 && kParamControlRoot == 1 && kParamTriggerStart == 2 &&
-                  kParamBorrowTop == 3 && kParamBorrowSecond == 4 && kParamBorrowThird == 5,
+                  kParamBorrowTop == 3 && kParamBorrowSecond == 4 && kParamBorrowThird == 5 &&
+                  kParamContraryMotion == 6,
               "ids are frozen");
 
 const char *kNoteNames[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
@@ -134,6 +137,10 @@ ScaleSelection decodeSelection(int encoded)
 // Voice tracking
 // ---------------------------------------------------------------------------
 
+// A held chord's voices: the up-to-four chord notes, plus one contrary-motion extra
+// note when contrary motion is on and the press sat above the session key.
+constexpr int kHeldVoices = kStackedChordNotes + 1;
+
 // One entry per held trigger key.
 struct HeldChord
 {
@@ -167,7 +174,7 @@ struct HeldChord
   {
     int32_t noteId = -1;
     int16_t key = 0;
-  } voices[kStackedChordNotes];
+  } voices[kHeldVoices];
 };
 
 constexpr int kMaxHeldChords = 32;
@@ -200,6 +207,15 @@ struct Bhl
   std::atomic<int> borrowTop = {0};
   std::atomic<int> borrowSecond = {0};
   std::atomic<int> borrowThird = {0};
+
+  // The contrary-motion session: the held trigger key that started it, its channel,
+  // and the bottom note of the chord it triggered (the dropped bottom in drop
+  // voicings). A session starts with the first in-scale trigger press (with contrary
+  // motion on), lives until that key is released, and in-scale presses above it add
+  // its contrary note without moving it. Single session at a time.
+  int16_t contraryChannel = 0;
+  int16_t contraryKey = -1;
+  int16_t contraryBottom = -1;
 
   // Control-zone keys currently held, per (channel, key): counted, since a key can be
   // struck again before it is released.
@@ -260,6 +276,7 @@ struct Bhl
     gui.borrowTop.store(paramInt(kParamBorrowTop), std::memory_order_relaxed);
     gui.borrowSecond.store(paramInt(kParamBorrowSecond), std::memory_order_relaxed);
     gui.borrowThird.store(paramInt(kParamBorrowThird), std::memory_order_relaxed);
+    gui.contraryMotion.store(paramInt(kParamContraryMotion), std::memory_order_relaxed);
   }
 
   BorrowSettings borrowSettings() const
@@ -267,6 +284,17 @@ struct Bhl
     return {static_cast<BorrowDir>(paramInt(kParamBorrowThird)),
             static_cast<BorrowDir>(paramInt(kParamBorrowSecond)),
             static_cast<BorrowDir>(paramInt(kParamBorrowTop))};
+  }
+
+  bool contraryMotionEnabled() const
+  {
+    return paramInt(kParamContraryMotion) != 0;
+  }
+
+  void clearContrarySession()
+  {
+    contraryKey = -1;
+    contraryBottom = -1;
   }
 };
 
@@ -430,6 +458,9 @@ void drainGuiRequests(Bhl *rc, const clap_output_events_t *out, uint32_t time)
         break;
       case GuiState::Request::BorrowThird:
         id = kParamBorrowThird;
+        break;
+      case GuiState::Request::ContraryMotion:
+        id = kParamContraryMotion;
         break;
     }
 
@@ -686,8 +717,8 @@ void revoiceHeldChord(Bhl *rc, HeldChord *held, const clap_event_note_t *note,
 {
   // Snapshot the current voices before rewriting the list in place.
   const int oldCount = held->count;
-  int16_t oldKeys[kStackedChordNotes] = {};
-  int32_t oldNoteIds[kStackedChordNotes] = {};
+  int16_t oldKeys[kHeldVoices] = {};
+  int32_t oldNoteIds[kHeldVoices] = {};
   for (int i = 0; i < oldCount; ++i)
   {
     oldKeys[i] = held->voices[i].key;
@@ -868,8 +899,15 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
   const auto voicing = static_cast<VoicingType>(rc->paramInt(kParamVoicing));
   const BorrowSettings borrow = rc->borrowSettings();
 
-  // A cancel note re-voices an existing chord rather than sounding a new one.
-  if (undoBorrow(rc, sel, note, out)) return;
+  // Contrary motion disables the borrow revert, and with it the borrow session that
+  // keeps keys below a borrowed chord's top from triggering; a session left over
+  // from when the switch was on goes quiet with it.
+  const bool contrary = rc->contraryMotionEnabled();
+  if (!contrary)
+  {
+    rc->clearContrarySession();
+    if (undoBorrow(rc, sel, note, out)) return;
+  }
 
   // While a chord triggered with a borrow switch on is held, keys below its top do
   // not trigger: a cancel note reverts the borrow (handled above), everything else
@@ -877,19 +915,22 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
   // previous chord the space above its top belongs to the session too: the
   // un-borrowed top reverts the chord (handled above), every other note above --
   // in-scale or not -- passes through rather than triggering a chord of its own.
-  for (auto &h : rc->held)
+  if (!contrary)
   {
-    if (!h.active || !h.borrowActive) continue;
-    if (note->channel >= 0 && h.channel != note->channel) continue;
-    if (note->key < h.key)
+    for (auto &h : rc->held)
     {
-      forwardNoteOn(rc, out, hdr);
-      return;
-    }
-    if (h.topBorrowPrev)
-    {
-      forwardNoteOn(rc, out, hdr);
-      return;
+      if (!h.active || !h.borrowActive) continue;
+      if (note->channel >= 0 && h.channel != note->channel) continue;
+      if (note->key < h.key)
+      {
+        forwardNoteOn(rc, out, hdr);
+        return;
+      }
+      if (h.topBorrowPrev)
+      {
+        forwardNoteOn(rc, out, hdr);
+        return;
+      }
     }
   }
 
@@ -934,6 +975,39 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
                      note->velocity);
   }
 
+  // With contrary motion on, an in-scale press above the session key adds the
+  // session's contrary note to this chord. The session itself starts with the first
+  // in-scale trigger press and lives until its trigger key is released; presses
+  // above it add contrary notes against the original session rather than moving it,
+  // and the bottom note it walks from is that of the chord the session key
+  // triggered -- the dropped bottom in drop voicings, since the chord notes come out
+  // sorted -- at trigger time.
+  if (contrary)
+  {
+    const int sessionKey = rc->contraryKey;
+    int extraNote = -1;
+    if (sessionKey >= 0 && note->key > sessionKey &&
+        (note->channel < 0 || note->channel == rc->contraryChannel))
+      extraNote = contraryNote(sel, sessionKey, rc->contraryBottom, note->key);
+
+    if (extraNote >= 0)
+    {
+      held->voices[held->count].key = static_cast<int16_t>(extraNote);
+      held->voices[held->count].noteId =
+          acquireVoice(rc, out, note->header.time, channel, static_cast<int16_t>(extraNote),
+                       note->velocity);
+      rc->gui.chordOn(extraNote);
+      ++held->count;
+    }
+
+    if (rc->contraryKey < 0)
+    {
+      rc->contraryChannel = channel;
+      rc->contraryKey = note->key;
+      rc->contraryBottom = chord.notes[0];
+    }
+  }
+
   rc->gui.rootKey.store(note->key, std::memory_order_relaxed);
 }
 
@@ -971,11 +1045,12 @@ void handleEvent(Bhl *rc, const clap_event_header_t *hdr, const clap_output_even
       // A cancel note reverts a held borrowed chord from below the trigger zone as
       // well: the pressed note's pitch class selects the revert, not its position on
       // the keyboard. (Trigger-zone keys run the same check inside triggerChord.)
+      // Contrary motion disables the revert altogether.
       const Zone zone = zoneOf(rc, note->key);
       if (zone != Zone::Trigger)
       {
         const ScaleSelection sel = decodeSelection(rc->selection.load(std::memory_order_relaxed));
-        if (undoBorrow(rc, sel, note, out)) break;
+        if (!rc->contraryMotionEnabled() && undoBorrow(rc, sel, note, out)) break;
       }
 
       switch (zone)
@@ -1025,6 +1100,14 @@ void handleEvent(Bhl *rc, const clap_event_header_t *hdr, const clap_output_even
         h.overrideKey = -1;
         rc->gui.rootKey.store(h.key, std::memory_order_relaxed);
       }
+
+      // Releasing the contrary-motion session's trigger key ends the session. Checked
+      // against the stored key, not the zones: the boundaries may have moved since the
+      // key went down, and the session survives the contrary switch being flipped
+      // (a release of a stale session key is harmless either way).
+      if (rc->contraryKey == note->key &&
+          (note->channel < 0 || note->channel == rc->contraryChannel))
+        rc->clearContrarySession();
 
       // Release by what the key owns rather than by where the zones sit now: the
       // boundaries are parameters and may have moved since the key went down. Deciding
@@ -1152,6 +1235,9 @@ bool CLAP_ABI paramsValueToText(const clap_plugin_t *, clap_id id, double value,
     case kParamBorrowThird:
       snprintf(out, cap, "%s", borrowDirName(static_cast<BorrowDir>(v)));
       return true;
+    case kParamContraryMotion:
+      snprintf(out, cap, "%s", v >= 0.5 ? "On" : "Off");
+      return true;
     case kParamControlRoot:
     case kParamTriggerStart:
     {
@@ -1188,6 +1274,18 @@ bool CLAP_ABI paramsTextToValue(const clap_plugin_t *, clap_id id, const char *t
           *out = i;
           return true;
         }
+      break;
+    case kParamContraryMotion:
+      if (strcasecmp(text, "on") == 0)
+      {
+        *out = 1;
+        return true;
+      }
+      if (strcasecmp(text, "off") == 0)
+      {
+        *out = 0;
+        return true;
+      }
       break;
     default:
       break;
@@ -1276,7 +1374,7 @@ const clap_plugin_audio_ports_t kAudioPortsExtension = {audioPortsCount, audioPo
 // clap_plugin_state
 // ---------------------------------------------------------------------------
 
-constexpr uint32_t kStateVersion = 3;
+constexpr uint32_t kStateVersion = 4;
 
 bool CLAP_ABI stateSave(const clap_plugin_t *plugin, const clap_ostream_t *stream)
 {
@@ -1550,6 +1648,7 @@ void CLAP_ABI pluginReset(const clap_plugin_t *plugin)
   std::memset(rc->forwarded, 0, sizeof(rc->forwarded));
   std::memset(rc->controlHeld, 0, sizeof(rc->controlHeld));
   rc->controlHeldKeys = 0;
+  rc->clearContrarySession();
   rc->gui.allNotesOff();
 }
 

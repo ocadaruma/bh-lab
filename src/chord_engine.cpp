@@ -427,6 +427,43 @@ bool isCancelledBorrowVoice(const ScaleSelection &sel, int degree, int pc,
   return false;
 }
 
+int contraryNote(const ScaleSelection &sel, int sessionKey, int bottomKey, int pressKey)
+{
+  const int f = static_cast<int>(sel.family);
+  if (!inRange(f, static_cast<int>(ScaleFamily::Count))) return -1;
+  if (sessionKey < 0 || sessionKey > 127 || bottomKey < 0 || bottomKey > 127 ||
+      pressKey < 0 || pressKey > 127)
+    return -1;
+  if (pressKey <= sessionKey) return -1;
+
+  const uint16_t pcs = scalePitchClasses(sel.family);
+  auto inScale = [&](int key) { return (pcs >> (key % 12)) & 1u; };
+  if (!inScale(sessionKey) || !inScale(pressKey)) return -1;
+
+  // The offset: the scale steps between the session key and the pressed key,
+  // walking the scale up. The loop always terminates at pressKey, an in-scale note.
+  int steps = 0;
+  for (int k = sessionKey; k < pressKey;)
+  {
+    int next = k + 1;
+    while (!inScale(next)) ++next;
+    k = next;
+    if (++steps > 128) return -1;  // Safety: eight scale notes per octave.
+  }
+
+  // Walk `steps` down the scale from the session chord's bottom note. Only scale
+  // notes are ever visited, so the contrary note is always in the scale.
+  int note = bottomKey;
+  for (int i = 0; i < steps; ++i)
+  {
+    int prev = note - 1;
+    while (prev >= 0 && !inScale(prev)) --prev;
+    if (prev < 0) return -1;  // Below the bottom of the keyboard: no contrary note.
+    note = prev;
+  }
+  return note;
+}
+
 const char *borrowDirName(BorrowDir dir)
 {
   static const char *names[static_cast<int>(BorrowDir::Count)] = {"None", "Prev", "Next"};

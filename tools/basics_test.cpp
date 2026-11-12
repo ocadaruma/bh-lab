@@ -1,6 +1,7 @@
 // The basics of the plugin, checked from the outside: scale selection in the control
 // octave, stacked chords in the trigger zone, and pass-through of out-of-scale notes.
 
+#include <algorithm>
 #include <initializer_list>
 
 #include "clap_test_host.h"
@@ -21,6 +22,7 @@ void reset(const clap_plugin_t *plugin, Timeline *timeline)
   setup.addParam(kBorrowTop, 0);      // None
   setup.addParam(kBorrowSecond, 0);   // None
   setup.addParam(kBorrowThird, 0);    // None
+  setup.addParam(kContraryMotion, 0); // Off
   (void)plugin;
   timeline->run(&setup);
   timeline->runFor(2);
@@ -50,6 +52,7 @@ std::vector<int> onKeys()
 {
   std::vector<int> keys;
   for (const auto &e : noteOns()) keys.push_back(e.key);
+  std::sort(keys.begin(), keys.end());
   return keys;
 }
 
@@ -1249,6 +1252,248 @@ int main()
     for (const auto &e : g_emitted)
       if (!e.on) ++offs;
     expect("releasing B4 stops C4 E4 G4 (3 offs)", offs == 3, describe(g_emitted));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 48, 0.0);
+    timeline.run(&release);
+  }
+  expect("the control release is silent", g_emitted.empty(), describe(g_emitted));
+
+  // --- contrary motion -----------------------------------------------------------
+  // C major 6th, close voicing, no borrow: A4 sounds C4 E4 G4 A4, bottom C4. With
+  // contrary motion on, an in-scale press above the session key adds the note found
+  // by walking the scale down from the bottom by the steps between the keys.
+  reset(plugin, &timeline);
+  {
+    InputEvents setup;
+    setup.addParam(kContraryMotion, 1);  // On
+    timeline.run(&setup);
+  }
+  holdControl(&timeline, {48});  // C2: C major 6th in force
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 69, 0.8);  // A4 -> C4 E4 G4 A4, session starts
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool chord = first.size() == 4 && first[0].key == 60 && first[1].key == 64 &&
+                       first[2].key == 67 && first[3].key == 69;
+    expect("contrary on: A4 sounds C4 E4 G4 A4", chord, describe(first));
+  }
+  // B4 is one scale step above A4 (A, B): one step down from C4 is B3, added to B4's
+  // own chord D4 F4 Ab4 B4.
+  g_emitted.clear();
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 71, 0.8);
+    timeline.run(&press);
+  }
+  {
+    const std::vector<int> keys = onKeys();
+    const bool withContrary = keys.size() == 5 && keys[0] == 59 && keys[1] == 62 &&
+                              keys[2] == 65 && keys[3] == 68 && keys[4] == 71;
+    expect("B4 over the session adds B3 to D4 F4 Ab4 B4", withContrary, describe(g_emitted));
+  }
+  // C5 is two scale steps above A4 (A, B, C): two steps down from C4 is A3, added to
+  // C5's own chord E3 G3 A3 C5. The shared E3 G3 A3 are not re-sounded.
+  g_emitted.clear();
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 72, 0.8);
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool newNotes = first.size() == 2 && first[0].on && first[1].on &&
+                          first[0].key != first[1].key &&
+                          (first[0].key == 57 || first[1].key == 57) &&
+                          (first[0].key == 72 || first[1].key == 72);
+    expect("C5 over the session adds A3 (shared E3 G3 A3 not re-sounded)", newNotes,
+           describe(g_emitted));
+  }
+  // Releasing C5 stops its chord and its contrary note; the session chord keeps
+  // the shared E3 G3 A3 ringing.
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 72, 0.0);
+    timeline.run(&release);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool releaseKept = first.size() == 2 && !first[0].on && !first[1].on &&
+                             (first[0].key == 57 || first[1].key == 57) &&
+                             (first[0].key == 72 || first[1].key == 72);
+    expect("releasing C5 stops C5 and A3 (E3 G3 A3 stay)", releaseKept, describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 71, 0.0);
+    timeline.run(&release);
+  }
+  {
+    int offs = 0;
+    for (const auto &e : g_emitted)
+      if (!e.on) ++offs;
+    expect("releasing B4 stops its chord and B3 (5 offs)", offs == 5, describe(g_emitted));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 69, 0.0);  // A4, the session key: ends it
+    timeline.run(&release);
+  }
+  {
+    int offs = 0;
+    for (const auto &e : g_emitted)
+      if (!e.on) ++offs;
+    expect("releasing A4 stops the session chord (4 offs)", offs == 4, describe(g_emitted));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 48, 0.0);
+    timeline.run(&release);
+  }
+  expect("the control release is silent", g_emitted.empty(), describe(g_emitted));
+
+  // An out-of-scale press during the session passes through and leaves the session
+  // intact: B4 afterwards still gets its contrary note against A4.
+  reset(plugin, &timeline);
+  {
+    InputEvents setup;
+    setup.addParam(kContraryMotion, 1);
+    timeline.run(&setup);
+  }
+  holdControl(&timeline, {48});
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 69, 0.8);  // A4, session starts
+    timeline.run(&press);
+  }
+  g_emitted.clear();
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 73, 0.8);  // C#5, out of scale
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool passed = first.size() == 1 && first[0].on && first[0].key == 73;
+    expect("an out-of-scale press passes through (no contrary note)", passed,
+           describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 71, 0.8);  // B4, still over the A4 session
+    timeline.run(&press);
+  }
+  {
+    const std::vector<int> keys = onKeys();
+    const bool withContrary = keys.size() == 5 && keys[0] == 59 && keys[1] == 62 &&
+                              keys[2] == 65 && keys[3] == 68 && keys[4] == 71;
+    expect("B4 still gets B3 from the A4 session", withContrary, describe(g_emitted));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 73, 0.0);
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 71, 0.0);
+    timeline.run(&release);
+  }
+  {
+    int offs = 0;
+    for (const auto &e : g_emitted)
+      if (!e.on) ++offs;
+    expect("releases stop the pass-through, the chord, and B3 (6 offs)", offs == 6,
+           describe(g_emitted));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 69, 0.0);
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 48, 0.0);
+    timeline.run(&release);
+  }
+  {
+    int offs = 0;
+    for (const auto &e : g_emitted)
+      if (!e.on) ++offs;
+    expect("releasing A4 and the control note stops the rest (4 offs)", offs == 4,
+           describe(g_emitted));
+  }
+  g_emitted.clear();
+
+  // Contrary motion disables the borrow revert: with the top borrowed from the next,
+  // B4 sounds C4 E4 G4 B4, and pressing A4 (the un-borrowed top, below B4) triggers
+  // its own chord instead of reverting the borrow.
+  reset(plugin, &timeline);
+  {
+    InputEvents setup;
+    setup.addParam(kBorrowTop, 2);  // Next
+    setup.addParam(kContraryMotion, 1);
+    timeline.run(&setup);
+  }
+  holdControl(&timeline, {48});
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 71, 0.8);  // B4 -> C4 E4 G4 B4, session starts
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool borrowed = first.size() == 4 && first[0].key == 60 && first[1].key == 64 &&
+                          first[2].key == 67 && first[3].key == 71;
+    expect("borrowed chord sounds C4 E4 G4 B4 (contrary on)", borrowed, describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 69, 0.8);  // A4, the un-borrowed top
+    timeline.run(&press);
+  }
+  {
+    int offs = 0;
+    for (const auto &e : g_emitted)
+      if (!e.on) ++offs;
+    const std::vector<Emitted> first = g_emitted;
+    // A4's own borrowed chord (degree 7: C# D F A) is B3 D3 F3 A4. It sits below the
+    // session key, so no contrary note joins it, and nothing is released -- the
+    // revert is off.
+    const bool triggered = offs == 0 && first.size() == 4 &&
+                           first[0].key == 59 && first[1].key == 62 && first[2].key == 65 &&
+                           first[3].key == 69;
+    expect("pressing A4 triggers its chord instead of reverting the borrow",
+           triggered, describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 69, 0.0);
+    timeline.run(&release);
+  }
+  {
+    int offs = 0;
+    for (const auto &e : g_emitted)
+      if (!e.on) ++offs;
+    expect("releasing A4 stops its chord (4 offs)", offs == 4, describe(g_emitted));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 71, 0.0);
+    timeline.run(&release);
+  }
+  {
+    int offs = 0;
+    for (const auto &e : g_emitted)
+      if (!e.on) ++offs;
+    expect("releasing B4 stops C4 E4 G4 B4 (4 offs)", offs == 4, describe(g_emitted));
   }
   g_emitted.clear();
   {

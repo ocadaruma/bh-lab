@@ -18,7 +18,7 @@ namespace
 {
 
 constexpr uint32_t kViewWidth = 810;
-constexpr uint32_t kViewHeight = 346;
+constexpr uint32_t kViewHeight = 358;
 
 // The keyboard is a full 88-key board (A0..G8), covering every zone with room either
 // side.
@@ -36,12 +36,13 @@ constexpr CGFloat kVoicingRowY = 72;
 constexpr CGFloat kBorrowTopRowY = 108;
 constexpr CGFloat kBorrowSecondRowY = 144;
 constexpr CGFloat kBorrowThirdRowY = 180;
+constexpr CGFloat kContraryRowY = 216;
 constexpr CGFloat kRowHeight = 30;
 
 // The keyboard sits a gap below the stacking rows: it controls the zones, which is a
 // different role than the voicing / borrow picks above.
-constexpr CGFloat kKeyboardLabelY = 240;
-constexpr CGFloat kKeyboardY = 256;
+constexpr CGFloat kKeyboardLabelY = 252;
+constexpr CGFloat kKeyboardY = 268;
 constexpr CGFloat kKeyboardHeight = 72;
 
 NSRect voicingButtonRect(int index, CGFloat viewWidth)
@@ -61,6 +62,16 @@ NSRect borrowButtonRect(int row, int index, CGFloat viewWidth)
   const int count = static_cast<int>(BorrowDir::Count);
   const CGFloat w = (total - kButtonGap * (count - 1)) / count;
   return NSMakeRect(x0 + index * (w + kButtonGap), kRowY[row], w, kRowHeight);
+}
+
+// The contrary motion row: a plain Off | On toggle, off by default.
+NSRect contraryButtonRect(int index, CGFloat viewWidth)
+{
+  const CGFloat x0 = kPad + kLabelWidth + 6;
+  const CGFloat total = viewWidth - kPad - x0;
+  const int count = 2;
+  const CGFloat w = (total - kButtonGap * (count - 1)) / count;
+  return NSMakeRect(x0 + index * (w + kButtonGap), kContraryRowY, w, kRowHeight);
 }
 
 // The borrow buttons read Prev | None | Next, left to right.
@@ -213,6 +224,7 @@ struct Snapshot
   int borrowTop = -1;
   int borrowSecond = -1;
   int borrowThird = -1;
+  int contraryMotion = -1;
   int controlRoot = -1;
   int triggerStart = -1;
 
@@ -224,6 +236,7 @@ struct Snapshot
            heldControl[0] == o.heldControl[0] && heldControl[1] == o.heldControl[1] &&
            voicing == o.voicing && borrowTop == o.borrowTop &&
            borrowSecond == o.borrowSecond && borrowThird == o.borrowThird &&
+           contraryMotion == o.contraryMotion &&
            controlRoot == o.controlRoot &&
            triggerStart == o.triggerStart;
   }
@@ -244,6 +257,7 @@ Snapshot takeSnapshot(GuiState *state)
   s.borrowTop = state->borrowTop.load(std::memory_order_relaxed);
   s.borrowSecond = state->borrowSecond.load(std::memory_order_relaxed);
   s.borrowThird = state->borrowThird.load(std::memory_order_relaxed);
+  s.contraryMotion = state->contraryMotion.load(std::memory_order_relaxed);
   s.controlRoot = state->controlRoot.load(std::memory_order_relaxed);
   s.triggerStart = state->triggerStart.load(std::memory_order_relaxed);
   return s;
@@ -564,6 +578,15 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
     }
   }
 
+  // Contrary motion row: an on/off switch.
+  drawText(@"CONTRARY", NSMakeRect(kPad, kContraryRowY + 9, kLabelWidth, 14), 9.5,
+           gray(0.45), NSTextAlignmentLeft, NSFontWeightSemibold);
+  for (int i = 0; i < 2; ++i)
+    [self drawButton:contraryButtonRect(i, [self bounds].size.width)
+               title:i == 1 ? @"On" : @"Off"
+            selected:i == _lastDrawn.contraryMotion
+               inert:NO];
+
   // Keyboard: the single 88-key board with the control and trigger zones tinted.
   drawText(@"KEYBOARD", NSMakeRect(kPad, kKeyboardLabelY, 400, 14), 9.5, gray(0.45),
            NSTextAlignmentLeft, NSFontWeightSemibold);
@@ -622,6 +645,18 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
           return;
         }
       }
+  }
+
+  {
+    for (int i = 0; i < 2; ++i)
+    {
+      if (NSPointInRect(p, contraryButtonRect(i, viewWidth)))
+      {
+        _state->request(GuiState::Request::ContraryMotion, i);
+        [self setNeedsDisplay:YES];
+        return;
+      }
+    }
   }
 
   {
@@ -722,6 +757,13 @@ ViewRect guiBorrowButtonRect(int row, int index, double viewWidth)
   if (index < 0 || index >= static_cast<int>(BorrowDir::Count)) return {};
   const int slot = index == 0 ? 1 : index;
   const NSRect r = borrowButtonRect(row, slot, viewWidth);
+  return {r.origin.x, r.origin.y, r.size.width, r.size.height};
+}
+
+ViewRect guiContraryButtonRect(int index, double viewWidth)
+{
+  if (index < 0 || index > 1) return {};
+  const NSRect r = contraryButtonRect(index, viewWidth);
   return {r.origin.x, r.origin.y, r.size.width, r.size.height};
 }
 

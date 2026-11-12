@@ -152,6 +152,16 @@ Chord buildOverrideChord(const ScaleSelection &sel, int degree, int triggerKey, 
 bool isCancelledBorrowVoice(const ScaleSelection &sel, int degree, int pc,
                             const BorrowSettings &borrow);
 
+// Contrary motion: the additional note to sound when `pressKey` is pressed above the
+// key that started the contrary-motion session (`sessionKey`). The offset is the
+// number of scale steps between the session key and the pressed key; the note is
+// found by walking that many steps down the scale from `bottomKey`, the session
+// chord's bottom note (its dropped bottom for drop voicings). Walking the scale
+// guarantees the result is always an in-scale note. Returns -1 when no contrary
+// note is produced: either key outside 0..127, either not in the scale, the press
+// not above the session key, or the walk running below key 0.
+int contraryNote(const ScaleSelection &sel, int sessionKey, int bottomKey, int pressKey);
+
 // "None", "Prev", "Next", for a borrow button.
 const char *borrowDirName(BorrowDir dir);
 

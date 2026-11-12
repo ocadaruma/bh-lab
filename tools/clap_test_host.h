@@ -215,5 +215,6 @@ constexpr clap_id kTriggerStart = 2;
 constexpr clap_id kBorrowTop = 3;
 constexpr clap_id kBorrowSecond = 4;
 constexpr clap_id kBorrowThird = 5;
+constexpr clap_id kContraryMotion = 6;
 
 }  // namespace bhl_test

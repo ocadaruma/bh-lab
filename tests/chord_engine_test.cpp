@@ -326,6 +326,53 @@ int main()
               buildOverrideChord(c6, 2, 71, 79, VoicingType::Close),
               (const int[]){64, 67, 69, 72}, 4);
 
+  // --- contrary motion ---------------------------------------------------------
+  // The contrary note walks down the scale by the number of scale steps between the
+  // session key and the pressed key, starting from the session chord's bottom note,
+  // so it is always an in-scale note.
+
+  // C major 6th dim, close voicing, no borrow: A4's chord is C4 E4 G4 A4, bottom C4.
+  // The scale is C D E F G Ab A B: A4 -> B4 is one scale step (A, B), and one step
+  // down from C4 is B3, so pressing B4 over the session adds B3 below the chord.
+  {
+    expectTrue("contrary: B4 over A4 session", contraryNote(c6, 81, 72, 83) == 71);
+    // A4 -> C5 is two scale steps (A, B, C): two steps down from C4 is A3.
+    expectTrue("contrary: C5 over A4 session", contraryNote(c6, 81, 72, 84) == 69);
+    // A4 -> A5 is a full cycle of eight steps: the bottom note an octave down.
+    expectTrue("contrary: A5 over A4 session is a full cycle", contraryNote(c6, 81, 72, 93) == 60);
+  }
+
+  // The same session in Drop2&4: A4's chord is C3 G3 E4 A4, bottom C3 (the dropped C).
+  {
+    expectTrue("contrary drop: B4 over A4 session", contraryNote(c6, 81, 60, 83) == 59);
+    expectTrue("contrary drop: C5 over A4 session", contraryNote(c6, 81, 60, 84) == 57);
+  }
+
+  // With the top and 2nd borrowed from the next, A4's chord is B2 G3 D4 A4, bottom B2.
+  {
+    // A4 -> C5 is two steps down from B2: A2, Ab2.
+    expectTrue("contrary borrowed: C5 over A4 session", contraryNote(c6, 81, 59, 84) == 56);
+    // A4 -> D5 is three steps down from B2: A2, Ab2, G2.
+    expectTrue("contrary borrowed: D5 over A4 session", contraryNote(c6, 81, 59, 86) == 55);
+  }
+
+  // No contrary note without one.
+  {
+    expectTrue("contrary: press at the session key", contraryNote(c6, 81, 72, 81) == -1);
+    expectTrue("contrary: press below the session key", contraryNote(c6, 81, 72, 79) == -1);
+    expectTrue("contrary: out-of-scale press", contraryNote(c6, 81, 72, 85) == -1);
+    expectTrue("contrary: out-of-scale session key", contraryNote(c6, 85, 72, 88) == -1);
+    expectTrue("contrary: keys out of range", contraryNote(c6, 128, 72, 83) == -1);
+    expectTrue("contrary: walk runs below key 0", contraryNote(c6, 69, 2, 72) == -1);
+  }
+
+  // The walk follows the selection's scale: A minor 6th (A B C D E F F# G#), A4's
+  // stack is C4 E4 G#4 A4, bottom C4. A4 -> C5 is two scale steps (A, B, C): two
+  // steps down from C4 in this scale (B3, then A3) is A3.
+  {
+    expectTrue("contrary: follows the scale (minor 6th)", contraryNote(am6, 81, 72, 84) == 69);
+  }
+
   if (failures)
   {
     printf("\n%d test(s) failed\n", failures);
