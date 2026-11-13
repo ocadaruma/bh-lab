@@ -1524,7 +1524,8 @@ int main()
 
   // --- note velocity scaling ----------------------------------------------------
   // Each note a trigger generates sounds at the trigger note's velocity times its own
-  // percentage: here bottom 50%, 2nd 100%, 3rd 150% and top 200%. A trigger at 0.8
+  // percentage: here 4th (bottom) 50%, 3rd 100%, 2nd 150% and top 200% (the numbers
+  // count from the top, as in the Drop voicing names). A trigger at 0.8
   // therefore comes out at 0.4, 0.8, 1.0 and 1.0 -- the over-100% values amplify and
   // clamp at the top of the velocity range. The contrary note runs at 75%.
   reset(plugin, &timeline);

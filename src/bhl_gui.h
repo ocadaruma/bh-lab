@@ -228,8 +228,8 @@ ViewRect guiBorrowButtonRect(int row, int index, double viewWidth);
 ViewRect guiContraryToggleRect(double viewWidth);
 
 // Test support: a velocity fader's track, by its note index (0 bottom, 1 second,
-// 2 third, 3 top, 4 contrary note); the display rows read TOP | 3RD | 2ND | BOTTOM |
-// CONTRARY.
+// 2 third, 3 top, 4 contrary note); the display rows read TOP | 2ND | 3RD | 4TH |
+// CONTRARY (labels count from the top, as in the Drop voicing names).
 ViewRect guiVelStepperRect(int index, double viewWidth);
 
 // Platform view lifecycle. The returned handle is an NSView* on macOS.

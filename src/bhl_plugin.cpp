@@ -98,9 +98,11 @@ const ParamDef kParamDefs[kNumParams] = {
     // Note-velocity percentages, relative to the pressed (trigger) note's velocity.
     // 1.0 is 100%; above 1.0 amplifies (the result is clamped to CLAP's 0..1 range).
     // The four chord parameters follow the generated notes, sorted low to high.
-    {kParamVelBottom, "Velocity Bottom", 0, 2, 1, false},
-    {kParamVelSecond, "Velocity 2nd", 0, 2, 1, false},
-    {kParamVelThird, "Velocity 3rd", 0, 2, 1, false},
+    // Display labels count from the top (1st = top), matching the Drop 2 / Drop 3 /
+    // Drop 2&4 voicing names: 2nd = second from the top, 3rd, 4th = bottom.
+    {kParamVelBottom, "Velocity 4th", 0, 2, 1, false},
+    {kParamVelSecond, "Velocity 3rd", 0, 2, 1, false},
+    {kParamVelThird, "Velocity 2nd", 0, 2, 1, false},
     {kParamVelTop, "Velocity Top", 0, 2, 1, false},
     {kParamVelContrary, "Velocity Contrary", 0, 2, 1, false},
 };
@@ -120,7 +122,8 @@ static_assert(kParamVoicing == 0 && kParamControlRoot == 1 && kParamTriggerStart
 
 // The velocity parameter of each generated note of one trigger: the four chord notes
 // low to high (the chord comes out sorted ascending), and the contrary motion's extra
-// note (index kStackedChordNotes).
+// note (index kStackedChordNotes). The display labels count from the top instead
+// (2nd = second from the top, 3rd, 4th = bottom), as in the Drop voicing names.
 constexpr ParamId kNoteVelocityParams[kStackedChordNotes + 1] = {
     kParamVelBottom, kParamVelSecond, kParamVelThird, kParamVelTop, kParamVelContrary};
 

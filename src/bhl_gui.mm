@@ -220,7 +220,7 @@ const int kBorrowSlotDirs[3] = {static_cast<int>(BorrowDir::Prev),
                                 static_cast<int>(BorrowDir::None),
                                 static_cast<int>(BorrowDir::Next)};
 
-// ---- Note velocity panel: five faders stacked in pitch order (Top, 3rd, 2nd, Bottom)
+// ---- Note velocity panel: five faders stacked in pitch order (Top, 2nd, 3rd, 4th)
 // with the contrary fader below a divider. Click or drag the track to set, in 5% steps;
 // double-click resets the note to 100%. ----
 
@@ -230,9 +230,10 @@ constexpr CGFloat kVelTrackH = 8;
 constexpr CGFloat kVelLabelW = 56;
 constexpr CGFloat kVelValueW = 40;
 
-// Display slot -> note index (0 bottom, 1 second, 2 third, 3 top, 4 contrary).
+// Display slot -> note index (0 bottom, 1 second, 2 third, 3 top, 4 contrary). The
+// labels count from the top, as in the Drop voicing names.
 const int kVelDisplayOrder[kVelStepperCount] = {3, 2, 1, 0, 4};
-const char *kVelNames[kVelStepperCount] = {"BOTTOM", "2ND", "3RD", "TOP", "CONTRARY"};
+const char *kVelNames[kVelStepperCount] = {"4TH", "3RD", "2ND", "TOP", "CONTRARY"};
 
 // Row tops: four fader rows, a divider, then the contrary fader.
 const CGFloat kVelRowY[kVelStepperCount] = {kPanelY + 36, kPanelY + 65, kPanelY + 94,
@@ -1074,7 +1075,8 @@ ViewRect guiContraryToggleRect(double viewWidth)
 ViewRect guiVelStepperRect(int index, double viewWidth)
 {
   // The index is the note (0 bottom, 1 second, 2 third, 3 top, 4 contrary), not the
-  // display slot: the slots read TOP | 3RD | 2ND | BOTTOM | CONTRARY.
+  // display slot: the slots read TOP | 2ND | 3RD | 4TH | CONTRARY (labels count from
+  // the top, as in the Drop voicing names).
   if (index < 0 || index >= kVelStepperCount) return {};
   int slot = 0;
   while (slot < kVelStepperCount && kVelDisplayOrder[slot] != index) ++slot;
