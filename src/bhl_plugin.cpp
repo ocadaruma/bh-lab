@@ -71,6 +71,7 @@ enum ParamId : clap_id
   kParamVelThird = 9,
   kParamVelTop = 10,
   kParamVelContrary = 11,
+  kParamBorrowFourth = 12,
   kNumParams
 };
 
@@ -105,6 +106,9 @@ const ParamDef kParamDefs[kNumParams] = {
     {kParamVelThird, "Velocity 2nd", 0, 2, 1, false},
     {kParamVelTop, "Velocity Top", 0, 2, 1, false},
     {kParamVelContrary, "Velocity Contrary", 0, 2, 1, false},
+    // Appended at the end (id 12): parameter ids are never inserted or reused.
+    {kParamBorrowFourth, "Borrow 4th", 0, static_cast<double>(BorrowDir::Count) - 1, 0,
+     true},
 };
 
 static_assert(sizeof(kParamDefs) / sizeof(kParamDefs[0]) == kNumParams,
@@ -117,7 +121,8 @@ static_assert(sizeof(kParamDefs) / sizeof(kParamDefs[0]) == kNumParams,
 static_assert(kParamVoicing == 0 && kParamControlRoot == 1 && kParamTriggerStart == 2 &&
                   kParamBorrowTop == 3 && kParamBorrowSecond == 4 && kParamBorrowThird == 5 &&
                   kParamContraryMotion == 6 && kParamVelBottom == 7 && kParamVelSecond == 8 &&
-                  kParamVelThird == 9 && kParamVelTop == 10 && kParamVelContrary == 11,
+                  kParamVelThird == 9 && kParamVelTop == 10 && kParamVelContrary == 11 &&
+                  kParamBorrowFourth == 12,
               "ids are frozen");
 
 // The velocity parameter of each generated note of one trigger: the four chord notes
@@ -230,6 +235,7 @@ struct Bhl
   std::atomic<int> borrowTop = {0};
   std::atomic<int> borrowSecond = {0};
   std::atomic<int> borrowThird = {0};
+  std::atomic<int> borrowFourth = {0};
 
   // The contrary-motion session: the held trigger key that started it, its channel,
   // and the bottom note of the chord it triggered (the dropped bottom in drop
@@ -299,6 +305,7 @@ struct Bhl
     gui.borrowTop.store(paramInt(kParamBorrowTop), std::memory_order_relaxed);
     gui.borrowSecond.store(paramInt(kParamBorrowSecond), std::memory_order_relaxed);
     gui.borrowThird.store(paramInt(kParamBorrowThird), std::memory_order_relaxed);
+    gui.borrowFourth.store(paramInt(kParamBorrowFourth), std::memory_order_relaxed);
     gui.contraryMotion.store(paramInt(kParamContraryMotion), std::memory_order_relaxed);
     gui.velBottom.store(paramValue(kParamVelBottom), std::memory_order_relaxed);
     gui.velSecond.store(paramValue(kParamVelSecond), std::memory_order_relaxed);
@@ -311,7 +318,8 @@ struct Bhl
   {
     return {static_cast<BorrowDir>(paramInt(kParamBorrowThird)),
             static_cast<BorrowDir>(paramInt(kParamBorrowSecond)),
-            static_cast<BorrowDir>(paramInt(kParamBorrowTop))};
+            static_cast<BorrowDir>(paramInt(kParamBorrowTop)),
+            static_cast<BorrowDir>(paramInt(kParamBorrowFourth))};
   }
 
   bool contraryMotionEnabled() const
@@ -497,6 +505,9 @@ void drainGuiRequests(Bhl *rc, const clap_output_events_t *out, uint32_t time)
         break;
       case GuiState::Request::BorrowThird:
         id = kParamBorrowThird;
+        break;
+      case GuiState::Request::BorrowFourth:
+        id = kParamBorrowFourth;
         break;
       case GuiState::Request::ContraryMotion:
         id = kParamContraryMotion;
@@ -831,7 +842,7 @@ bool undoBorrow(Bhl *rc, const ScaleSelection &sel, const clap_event_note_t *not
 {
   const BorrowSettings borrow = rc->borrowSettings();
   if (borrow.top == BorrowDir::None && borrow.second == BorrowDir::None &&
-      borrow.third == BorrowDir::None)
+      borrow.third == BorrowDir::None && borrow.fourth == BorrowDir::None)
     return false;
 
   for (auto &h : rc->held)
@@ -1013,7 +1024,7 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
   held->degree = degree;
   held->voicing = voicing;
   held->borrowActive = borrow.top != BorrowDir::None || borrow.second != BorrowDir::None ||
-                       borrow.third != BorrowDir::None;
+                       borrow.third != BorrowDir::None || borrow.fourth != BorrowDir::None;
   held->topBorrowPrev = borrow.top == BorrowDir::Prev;
   held->overrideKey = -1;
   held->overrideUsed = false;
@@ -1300,6 +1311,7 @@ bool CLAP_ABI paramsValueToText(const clap_plugin_t *, clap_id id, double value,
     case kParamBorrowTop:
     case kParamBorrowSecond:
     case kParamBorrowThird:
+    case kParamBorrowFourth:
       snprintf(out, cap, "%s", borrowDirName(static_cast<BorrowDir>(v)));
       return true;
     case kParamContraryMotion:
@@ -1342,6 +1354,7 @@ bool CLAP_ABI paramsTextToValue(const clap_plugin_t *, clap_id id, const char *t
     case kParamBorrowTop:
     case kParamBorrowSecond:
     case kParamBorrowThird:
+    case kParamBorrowFourth:
       for (int i = 0; i < static_cast<int>(BorrowDir::Count); ++i)
         if (strcasecmp(text, borrowDirName(static_cast<BorrowDir>(i))) == 0)
         {

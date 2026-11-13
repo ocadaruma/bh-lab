@@ -23,6 +23,7 @@ void reset(const clap_plugin_t *plugin, Timeline *timeline)
   setup.addParam(kBorrowTop, 0);      // None
   setup.addParam(kBorrowSecond, 0);   // None
   setup.addParam(kBorrowThird, 0);    // None
+  setup.addParam(kBorrowFourth, 0);   // None
   setup.addParam(kContraryMotion, 0); // Off
   setup.addParam(kVelBottom, 1.0);
   setup.addParam(kVelSecond, 1.0);
@@ -1271,6 +1272,100 @@ int main()
     for (const auto &e : g_emitted)
       if (!e.on) ++offs;
     expect("releasing B4 stops C4 E4 G4 (3 offs)", offs == 3, describe(g_emitted));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 48, 0.0);
+    timeline.run(&release);
+  }
+  expect("the control release is silent", g_emitted.empty(), describe(g_emitted));
+
+  // --- borrowing: the 4th voice (the bottom) borrows too --------------------------
+  // C major 6th, the 4th borrowed from the next: A4 on top of degree 0 sounds
+  // D4 E4 G4 A4 instead of C4 E4 G4 A4. Pressing C4 (the chord's own un-borrowed 4th,
+  // below the top) reverts the chord in place: D4 goes off, C4 on.
+  reset(plugin, &timeline);
+  {
+    InputEvents setup;
+    setup.addParam(kBorrowFourth, 2);  // Next
+    timeline.run(&setup);
+  }
+  holdControl(&timeline, {48});  // C2: C major 6th in force
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 69, 0.8);  // A4
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool borrowed = first.size() == 4 && first[0].key == 62 && first[1].key == 64 &&
+                          first[2].key == 67 && first[3].key == 69;
+    expect("4th borrowed next: A4 sounds D4 E4 G4 A4", borrowed, describe(first));
+  }
+  // With a borrow switch on, keys below the top pass through rather than triggering
+  // their own chord: F4 is in-scale but neither a cancel note nor the top.
+  g_emitted.clear();
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 65, 0.8);  // F4
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool passed = first.size() == 1 && first[0].on && first[0].key == 65;
+    expect("F4 below the borrowed chord passes through", passed, describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 65, 0.0);  // F4
+    timeline.run(&release);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool passed = first.size() == 1 && !first[0].on && first[0].key == 65;
+    expect("the F4 pass-through note-off passes through too", passed, describe(first));
+  }
+  g_emitted.clear();
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 60, 0.8);  // C4, the un-borrowed 4th
+    timeline.run(&press);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool cancelled = first.size() == 2 && !first[0].on && first[0].key == 62 &&
+                           first[1].on && first[1].key == 60;
+    expect("pressing C4 reverts the 4th borrow (D4 off, C4 on)", cancelled,
+           describe(first));
+  }
+  // Releasing the cancel note ends the un-borrowed form: C4 goes quiet, the borrowed
+  // D4 stays silent (a release sounds no new notes).
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 60, 0.0);  // C4
+    timeline.run(&release);
+  }
+  {
+    const std::vector<Emitted> first = g_emitted;
+    const bool silentRestore = first.size() == 1 && !first[0].on && first[0].key == 60;
+    expect("releasing C4 goes quiet (C4 off, D4 stays silent)", silentRestore,
+           describe(first));
+  }
+  // Releasing the trigger key stops whatever the chord still sounds.
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 69, 0.0);  // A4
+    timeline.run(&release);
+  }
+  {
+    int offs = 0;
+    for (const auto &e : g_emitted)
+      if (!e.on) ++offs;
+    expect("releasing A4 stops E4 G4 A4 (3 offs)", offs == 3, describe(g_emitted));
   }
   g_emitted.clear();
   {

@@ -73,9 +73,9 @@ Based on Barry Harris's diminished scale, the plugin triggers a chord
   * e.g. Assuming C major 6th diminished scale is selected
     - For chord C E G A, if we "borrow" a note for A from next, it will become C E G B
     - Similarly, if we borrow notes for G and A from next, it will become C E Ab B
-    - Borrowing is allowed for top 3 notes of the chord, and borrow direction is either from next or previous chord in the scale
+    - Borrowing is allowed for all four voices of the chord (top through the 4th, the bottom), and borrow direction is either from next or previous chord in the scale
 - In this plugin, this is implemented by below:
-  * Add 3 "borrow" switches for top 3 notes, each switch has 3 states: borrow from previous, no borrowing, borrow from next
+  * Add 4 "borrow" switches for the four voices (top, 2nd, 3rd, 4th), each switch has 3 states: borrow from previous, no borrowing, borrow from next
     * Borrowing will transform the stacked chords to new chords
   * The trigger rule is same, but it against the new transformed chords. e.g.
     * Assume C major 6th diminished scale, and close voicing

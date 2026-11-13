@@ -307,13 +307,14 @@ void borrowedChordClasses(const ScaleSelection &sel, int degree, const BorrowSet
   for (int i = 0; i < kScaleNoteCount; ++i) rootPositionStack(kFamilies[f], sel.keyPc, i,
                                                               rootPos[i]);
 
-  // Voice j (1..3 from the root) is taken from the chord one scale degree away when
+  // Voice j (0..3 from the root) is taken from the chord one scale degree away when
   // its switch is set: the adjacent chord's voice in the same stack position.
-  const int shift[3] = {degreeShift(borrow.third), degreeShift(borrow.second),
-                        degreeShift(borrow.top)};
-  classes[0] = rootPos[d][0];
-  for (int j = 1; j < kStackedChordNotes; ++j)
-    classes[j] = rootPos[(d + shift[j - 1] + kScaleNoteCount) % kScaleNoteCount][j];
+  const int shift[kStackedChordNotes] = {degreeShift(borrow.fourth),
+                                         degreeShift(borrow.third),
+                                         degreeShift(borrow.second),
+                                         degreeShift(borrow.top)};
+  for (int j = 0; j < kStackedChordNotes; ++j)
+    classes[j] = rootPos[(d + shift[j] + kScaleNoteCount) % kScaleNoteCount][j];
 }
 
 Chord buildDegreeChord(const ScaleSelection &sel, int degree, int topKey, VoicingType voicing,
@@ -373,16 +374,16 @@ Chord buildOverrideChord(const ScaleSelection &sel, int degree, int triggerKey, 
   const int l = pressKey % 12;
 
   // The pressed note selects the revert; it must be one of the degree's un-borrowed
-  // top-three voices. The chord itself is re-voiced in place, as the un-borrowed stack
+  // voices. The chord itself is re-voiced in place, as the un-borrowed stack
   // at the trigger key's octave: each voice sits where the borrowed form had it, and
   // the top goes to the side of the trigger key the un-borrowed top belongs to (below
   // for a next borrow, above for a previous one). The pressed key's own octave is not
   // moved to -- the chord keeps the octave it was triggered in. When the press sits in
   // that octave, its note is the chord's own voice.
   int pressedSlot = -1;
-  for (int j = 1; j < kStackedChordNotes; ++j)
+  for (int j = 0; j < kStackedChordNotes; ++j)
     if (u[j] % 12 == l) pressedSlot = j;
-  if (pressedSlot < 1) return chord;  // Not an un-borrowed voice of this degree.
+  if (pressedSlot < 0) return chord;  // Not an un-borrowed voice of this degree.
 
   int voices[kStackedChordNotes] = {};
   int count = 0;
@@ -420,9 +421,10 @@ bool isCancelledBorrowVoice(const ScaleSelection &sel, int degree, int pc,
   int classes[kStackedChordNotes];
   rootPositionStack(kFamilies[f], sel.keyPc, degree, classes);
 
-  const BorrowDir dir[3] = {borrow.third, borrow.second, borrow.top};
-  for (int j = 1; j < kStackedChordNotes; ++j)
-    if (dir[j - 1] != BorrowDir::None && classes[j] % 12 == pc) return true;
+  const BorrowDir dir[kStackedChordNotes] = {borrow.fourth, borrow.third, borrow.second,
+                                             borrow.top};
+  for (int j = 0; j < kStackedChordNotes; ++j)
+    if (dir[j] != BorrowDir::None && classes[j] % 12 == pc) return true;
 
   return false;
 }

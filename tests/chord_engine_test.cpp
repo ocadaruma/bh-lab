@@ -254,6 +254,38 @@ int main()
                 (const int[]){62, 65, 68, 69}, 4);
   }
 
+  // Borrow the 4th voice from the next chord: C E G A becomes D E G A, so A4 on top of
+  // degree 0 sounds D4 E4 G4 A4. Triggers match the borrowed tops only, so a 4th borrow
+  // changes no trigger key: B4 still triggers the dim chord, its 4th now the E of
+  // degree 2 -- E4 F4 Ab4 B4.
+  {
+    const BorrowSettings fourthNext = {BorrowDir::None, BorrowDir::None, BorrowDir::None,
+                                       BorrowDir::Next};
+    int degree = -1;
+    expectChord("4th borrowed next: A4 on top of C6",
+                buildBorrowedChord(c6, 69, VoicingType::Close, fourthNext, &degree),
+                (const int[]){62, 64, 67, 69}, 4);
+    expectTrue("4th borrowed next: A still triggers degree 0", degree == 0);
+    expectChord("4th borrowed next: B4 on top of C6",
+                buildBorrowedChord(c6, 71, VoicingType::Close, fourthNext),
+                (const int[]){64, 65, 68, 71}, 4);
+    // The cancel rule: pressing the un-borrowed 4th (C) cancels the borrowing; the
+    // borrowed 4th (D) does not, nor do the other voices whose switches are off.
+    expectTrue("C cancels the 4th borrow", isCancelledBorrowVoice(c6, 0, 0, fourthNext));
+    expectTrue("D does not cancel", !isCancelledBorrowVoice(c6, 0, 2, fourthNext));
+    expectTrue("E does not cancel", !isCancelledBorrowVoice(c6, 0, 4, fourthNext));
+  }
+
+  // Borrow the 4th voice from the previous chord: degree 0's root becomes the root of
+  // degree 7 (B), so A4 on top of degree 0 sounds B3 E4 G4 A4.
+  {
+    const BorrowSettings fourthPrev = {BorrowDir::None, BorrowDir::None, BorrowDir::None,
+                                       BorrowDir::Prev};
+    expectChord("4th borrowed prev: A4 on top of C6",
+                buildBorrowedChord(c6, 69, VoicingType::Close, fourthPrev),
+                (const int[]){59, 64, 67, 69}, 4);
+  }
+
   // buildDegreeChord re-voices a fixed degree with the pressed note on top: degree 0 of
   // C6 (C E G A) with A4 on top is C4 E4 G4 A4, with no re-derivation of the degree.
   expectChord("degree chord: A4 on degree 0 of C6",
@@ -279,6 +311,11 @@ int main()
   // un-borrowed 3rd-top note) while A4 is the top gives C4 E4 G4 A4 -- only D4 moves.
   expectChord("override: E4 under A4 on degree 0",
               buildOverrideChord(c6, 0, 69, 64, VoicingType::Close),
+              (const int[]){60, 64, 67, 69}, 4);
+  // The 4th voice reverts in place too: pressing C4 (the un-borrowed 4th) under A4
+  // with the 4th borrowed next swaps the borrowed D4 back to C4.
+  expectChord("override: C4 under A4 on degree 0 (4th borrowed next)",
+              buildOverrideChord(c6, 0, 69, 60, VoicingType::Close),
               (const int[]){60, 64, 67, 69}, 4);
   // Pressing the un-borrowed top (A4 under the borrowed top B4) takes the top itself.
   expectChord("override: A4 under B4 on degree 0",

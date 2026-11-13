@@ -2,7 +2,7 @@
 //
 // Layout, per the mockup (mockup/ui-mockup.html): a header with the scale in force
 // and the playing state; three side-by-side panels -- Voicing (2x2 buttons plus the
-// contrary-motion toggle), Borrowing (a 3x3 matrix), Note Velocity (five faders); a row
+// contrary-motion toggle), Borrowing (a 4x3 matrix), Note Velocity (five faders); a row
 // of control/trigger zone steppers; and the 88-key board with the zones drawn by color.
 //
 // Compiled without ARC (the CMake default for .mm), so the view is retained and released
@@ -190,13 +190,15 @@ NSRect contraryToggleRect(CGFloat viewWidth)
   return NSMakeRect(panelX(0) + kPanelPad, kPanelY + 144, kToggleWidth, kToggleHeight);
 }
 
-// ---- Borrowing panel: a 3x3 matrix. The row labels read Top / 2nd / 3rd; the column
-// slots read Prev | None | Next, under a small header row. ----
+// ---- Borrowing panel: a 4x3 matrix. The row labels read Top / 2nd / 3rd / 4th; the
+// column slots read Prev | None | Next, under a small header row. The four rows are
+// a little shorter than the voicing buttons, so the panel keeps its height. ----
 
 constexpr CGFloat kBorrowLabelW = 44;
 constexpr CGFloat kBorrowHeadY = kPanelY + 34;
 constexpr CGFloat kBorrowRow0Y = kPanelY + 52;
-constexpr CGFloat kBorrowRowStep = kBtnH + 9;
+constexpr CGFloat kBorrowBtnH = 28;
+constexpr CGFloat kBorrowRowStep = kBorrowBtnH + 4;
 
 CGFloat borrowColWidth()
 {
@@ -212,7 +214,7 @@ NSRect borrowButtonRect(int row, int slot, CGFloat viewWidth)
 {
   (void)viewWidth;
   return NSMakeRect(borrowColX(slot), kBorrowRow0Y + row * kBorrowRowStep, borrowColWidth(),
-                    kBtnH);
+                    kBorrowBtnH);
 }
 
 // The slots read Prev | None | Next, left to right.
@@ -380,6 +382,7 @@ struct Snapshot
   int borrowTop = -1;
   int borrowSecond = -1;
   int borrowThird = -1;
+  int borrowFourth = -1;
   int contraryMotion = -1;
   int controlRoot = -1;
   int triggerStart = -1;
@@ -393,6 +396,7 @@ struct Snapshot
            heldControl[0] == o.heldControl[0] && heldControl[1] == o.heldControl[1] &&
            voicing == o.voicing && borrowTop == o.borrowTop &&
            borrowSecond == o.borrowSecond && borrowThird == o.borrowThird &&
+           borrowFourth == o.borrowFourth &&
            contraryMotion == o.contraryMotion &&
            controlRoot == o.controlRoot &&
            triggerStart == o.triggerStart &&
@@ -416,6 +420,7 @@ Snapshot takeSnapshot(GuiState *state)
   s.borrowTop = state->borrowTop.load(std::memory_order_relaxed);
   s.borrowSecond = state->borrowSecond.load(std::memory_order_relaxed);
   s.borrowThird = state->borrowThird.load(std::memory_order_relaxed);
+  s.borrowFourth = state->borrowFourth.load(std::memory_order_relaxed);
   s.contraryMotion = state->contraryMotion.load(std::memory_order_relaxed);
   s.controlRoot = state->controlRoot.load(std::memory_order_relaxed);
   s.triggerStart = state->triggerStart.load(std::memory_order_relaxed);
@@ -807,22 +812,22 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
              textDim(), NSTextAlignmentLeft);
   }
 
-  // Borrowing: the header row, then the 3x3 matrix.
+  // Borrowing: the header row, then the 4x3 matrix.
   {
     static const char *kBorrowColHead[3] = {"\u25c0 PREV", "NONE", "NEXT \u25b6"};
-    static const char *kBorrowRowLabels[3] = {"Top", "2nd", "3rd"};
-    const int kBorrowRowValues[3] = {_lastDrawn.borrowTop, _lastDrawn.borrowSecond,
-                                     _lastDrawn.borrowThird};
+    static const char *kBorrowRowLabels[4] = {"Top", "2nd", "3rd", "4th"};
+    const int kBorrowRowValues[4] = {_lastDrawn.borrowTop, _lastDrawn.borrowSecond,
+                                     _lastDrawn.borrowThird, _lastDrawn.borrowFourth};
     for (int slot = 0; slot < 3; ++slot)
       drawText([NSString stringWithUTF8String:kBorrowColHead[slot]],
                NSMakeRect(borrowColX(slot), kBorrowHeadY, borrowColWidth(), 12), 8.5,
                textFaint(), NSTextAlignmentCenter, NSFontWeightSemibold);
-    for (int row = 0; row < 3; ++row)
+    for (int row = 0; row < 4; ++row)
     {
       const int value = kBorrowRowValues[row];
       drawText([NSString stringWithUTF8String:kBorrowRowLabels[row]],
                NSMakeRect(panelX(1) + kPanelPad, kBorrowRow0Y + row * kBorrowRowStep +
-                                          (kBtnH - 14) / 2,
+                                          (kBorrowBtnH - 14) / 2,
                           kBorrowLabelW - 4, 14), 11, textDim(), NSTextAlignmentRight);
       for (int slot = 0; slot < 3; ++slot)
       {
@@ -904,10 +909,11 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
 
   // The borrow matrix.
   {
-    static const GuiState::Request kBorrowRowRequests[3] = {GuiState::Request::BorrowTop,
+    static const GuiState::Request kBorrowRowRequests[4] = {GuiState::Request::BorrowTop,
                                                             GuiState::Request::BorrowSecond,
-                                                            GuiState::Request::BorrowThird};
-    for (int row = 0; row < 3; ++row)
+                                                            GuiState::Request::BorrowThird,
+                                                            GuiState::Request::BorrowFourth};
+    for (int row = 0; row < 4; ++row)
       for (int slot = 0; slot < 3; ++slot)
       {
         if (NSPointInRect(p, borrowButtonRect(row, slot, viewWidth)))
@@ -1058,7 +1064,7 @@ ViewRect guiBorrowButtonRect(int row, int index, double viewWidth)
 {
   // The index is the borrow direction (None, Prev, Next); the display slots read
   // Prev | None | Next.
-  if (row < 0 || row > 2) return {};
+  if (row < 0 || row > 3) return {};
   if (index < 0 || index >= static_cast<int>(BorrowDir::Count)) return {};
   const int slot = index == static_cast<int>(BorrowDir::Prev) ? 0
                       : index == static_cast<int>(BorrowDir::None) ? 1 : 2;

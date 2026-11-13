@@ -24,6 +24,7 @@ struct GuiState
   std::atomic<int> borrowTop = {0};
   std::atomic<int> borrowSecond = {0};
   std::atomic<int> borrowThird = {0};
+  std::atomic<int> borrowFourth = {0};
   std::atomic<int> contraryMotion = {0};
   std::atomic<int> controlRoot = {48};
   std::atomic<int> triggerStart = {60};
@@ -47,6 +48,7 @@ struct GuiState
     BorrowTop,
     BorrowSecond,
     BorrowThird,
+    BorrowFourth,
     ContraryMotion,
     VelBottom,
     VelSecond,
@@ -96,6 +98,9 @@ struct GuiState
         break;
       case Request::BorrowThird:
         borrowThird.store(static_cast<int>(value), std::memory_order_relaxed);
+        break;
+      case Request::BorrowFourth:
+        borrowFourth.store(static_cast<int>(value), std::memory_order_relaxed);
         break;
       case Request::ContraryMotion:
         contraryMotion.store(static_cast<int>(value), std::memory_order_relaxed);
@@ -220,8 +225,9 @@ ViewRect guiStepperRect(StepperId stepper, double viewWidth);
 // Drop2&4).
 ViewRect guiVoicingButtonRect(int index, double viewWidth);
 
-// Test support: a borrow row button. Row 0 is the top voice, 1 the second, 2 the third;
-// the index is the borrow direction (None, Prev, Next).
+// Test support: a borrow row button. Row 0 is the top voice, 1 the second, 2 the
+// third, 3 the fourth (the bottom); the index is the borrow direction (None, Prev,
+// Next).
 ViewRect guiBorrowButtonRect(int row, int index, double viewWidth);
 
 // Test support: the contrary motion toggle.
