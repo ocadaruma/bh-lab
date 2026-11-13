@@ -440,6 +440,11 @@ Snapshot takeSnapshot(GuiState *state)
   NSTimer *_timer;
   Snapshot _lastDrawn;
   int _velDragIndex;  // The fader slot being dragged, -1 when none.
+  // The zone stepper button being held: its stepper (0 control, 1 trigger), the step
+  // direction, and the repeat timer that keeps stepping while the button is down.
+  int _zoneStepIndex;
+  int _zoneStepDir;
+  NSTimer *_zoneStepTimer;
 }
 - (id)initWithState:(bhl::GuiState *)state;
 - (void)stopTimer;
@@ -450,6 +455,10 @@ Snapshot takeSnapshot(GuiState *state)
 - (void)drawZoneStepper:(NSRect)r label:(NSString *)label labelColor:(NSColor *)color
                   value:(NSString *)value;
 - (void)velSetFromPoint:(NSPoint)p slot:(int)slot;
+- (void)zoneStep:(int)index step:(int)step;
+- (void)startZoneRepeat:(int)index step:(int)step;
+- (void)stopZoneRepeat;
+- (void)zoneStepTick:(NSTimer *)timer;
 @end
 
 @implementation BhlView
@@ -486,6 +495,7 @@ Snapshot takeSnapshot(GuiState *state)
 - (void)dealloc
 {
   [self stopTimer];
+  [self stopZoneRepeat];
   [super dealloc];
 }
 
@@ -955,17 +965,15 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
     }
   }
 
-  // The zone steppers.
+  // The zone steppers: a click steps once, and holding the button keeps stepping
+  // until release.
   {
     const NSRect r = triggerStartStepperRect(viewWidth);
     const int step = [self zoneStepAt:p rect:r];
     if (step != 0 && NSPointInRect(p, r))
     {
-      int start = _state->triggerStart.load(std::memory_order_relaxed) + step;
-      if (start < 0) start = 127;
-      if (start > 127) start = 0;
-      _state->request(GuiState::Request::TriggerStart, start);
-      [self setNeedsDisplay:YES];
+      [self zoneStep:1 step:step];
+      [self startZoneRepeat:1 step:step];
       return;
     }
   }
@@ -975,11 +983,8 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
     const int step = [self zoneStepAt:p rect:r];
     if (step != 0 && NSPointInRect(p, r))
     {
-      int root = _state->controlRoot.load(std::memory_order_relaxed) + step;
-      if (root < 0) root = 115;
-      if (root > 115) root = 0;
-      _state->request(GuiState::Request::ControlRoot, root);
-      [self setNeedsDisplay:YES];
+      [self zoneStep:0 step:step];
+      [self startZoneRepeat:0 step:step];
       return;
     }
   }
@@ -993,10 +998,70 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
   [self setNeedsDisplay:YES];
 }
 
+// Steps one zone stepper by -1 / +1, wrapping around the parameter's range.
+// (Index 0 is the control zone root, 1 the trigger zone start.)
+- (void)zoneStep:(int)index step:(int)step
+{
+  if (index == 1)
+  {
+    int start = _state->triggerStart.load(std::memory_order_relaxed) + step;
+    if (start < 0) start = 127;
+    if (start > 127) start = 0;
+    _state->request(GuiState::Request::TriggerStart, start);
+  }
+  else
+  {
+    int root = _state->controlRoot.load(std::memory_order_relaxed) + step;
+    if (root < 0) root = 115;
+    if (root > 115) root = 0;
+    _state->request(GuiState::Request::ControlRoot, root);
+  }
+  [self setNeedsDisplay:YES];
+}
+
+// The held zone-stepper button keeps stepping until it is released, like a held key
+// on a keyboard: the first step lands on the click itself, then this timer takes over
+// after a short delay. The timer runs in common modes so it fires while the mouse is
+// still down and the run loop is tracking it.
+- (void)startZoneRepeat:(int)index step:(int)step
+{
+  [self stopZoneRepeat];
+  _zoneStepIndex = index;
+  _zoneStepDir = step;
+  _zoneStepTimer =
+      [[NSTimer alloc] initWithFireDate:[NSDate dateWithTimeIntervalSinceNow:0.35]
+                                interval:0.1
+                                  target:self
+                                selector:@selector(zoneStepTick:)
+                                userInfo:nil
+                                 repeats:YES];
+  [_zoneStepTimer retain];
+  [[NSRunLoop currentRunLoop] addTimer:_zoneStepTimer forMode:NSRunLoopCommonModes];
+}
+
+- (void)stopZoneRepeat
+{
+  if (_zoneStepTimer)
+  {
+    [_zoneStepTimer invalidate];
+    [_zoneStepTimer release];
+    _zoneStepTimer = nil;
+  }
+  _zoneStepIndex = -1;
+  _zoneStepDir = 0;
+}
+
+- (void)zoneStepTick:(NSTimer *)timer
+{
+  (void)timer;
+  if (_zoneStepIndex >= 0) [self zoneStep:_zoneStepIndex step:_zoneStepDir];
+}
+
 - (void)mouseUp:(NSEvent *)event
 {
   (void)event;
   _velDragIndex = -1;
+  [self stopZoneRepeat];
 }
 
 @end
