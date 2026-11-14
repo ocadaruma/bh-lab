@@ -98,24 +98,15 @@ NSColor *greenLit()  // The control zone's colour, light enough to read as text.
   return rgb(0.553, 0.855, 0.682);
 }
 
-NSColor *greenFill()  // #6fbf92-ish -- a selected Prev/Next borrow button.
+NSColor *greenFill()  // #6fbf92-ish -- a selected Prev/Next borrow button, contrary
+                      // motion on.
 {
   return rgb(0.455, 0.694, 0.439);
 }
 
-NSColor *greenDark()  // #3d8259-ish -- its border.
+NSColor *greenDark()  // #3d8259-ish -- its border, and the contrary-motion toggle on.
 {
   return rgb(0.239, 0.510, 0.353);
-}
-
-NSColor *violetFill()  // #a482e6-ish -- the contrary-motion toggle, on.
-{
-  return rgb(0.553, 0.447, 0.839);
-}
-
-NSColor *violetDark()  // #7d57c4-ish -- its border.
-{
-  return rgb(0.427, 0.302, 0.710);
 }
 
 // A key's zone: the control octave, else everything at or above the trigger start,
@@ -858,9 +849,9 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
                                           yRadius:r.size.height / 2];
     // NB: after attributed text drawing the context's stroke color is left as the
     // text color, so set the stroke explicitly rather than relying on the fill.
-    [on ? violetFill() : rgb(0.227, 0.231, 0.251) setFill];
+    [on ? greenFill() : rgb(0.227, 0.231, 0.251) setFill];
     [track fill];
-    [on ? violetDark() : rgb(0.275, 0.278, 0.302) setStroke];
+    [on ? greenDark() : rgb(0.275, 0.278, 0.302) setStroke];
     [track setLineWidth:1];
     [track stroke];
 
