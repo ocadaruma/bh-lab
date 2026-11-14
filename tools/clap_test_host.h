@@ -249,5 +249,6 @@ constexpr clap_id kVelThird = 9;
 constexpr clap_id kVelTop = 10;
 constexpr clap_id kVelContrary = 11;
 constexpr clap_id kBorrowFourth = 12;  // Appended last: ids are never inserted.
+constexpr clap_id kInversion = 13;  // Appended last: ids are never inserted.
 
 }  // namespace bhl_test

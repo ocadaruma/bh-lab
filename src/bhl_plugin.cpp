@@ -3,9 +3,10 @@
 // Notes held in the control octave identify the scale -- the family (major 6th, minor
 // 6th, 7th or 7th ♭5 diminished) and its key -- and the identification follows the
 // held notes live. Keys in the trigger zone each sound the stack of the selected
-// scale with the pressed note on top, optionally borrowed (a voice replaced by the
-// adjacent chord's voice) and drop-voiced; a trigger key outside the scale
-// passes through untouched.
+// scale with the pressed note on top, transformed by the pipeline borrowing (a voice
+// replaced by the adjacent chord's voice), inversion (the borrowed chord re-rotated
+// within its octave) and voicing (the pressed note matching the transformed chord's
+// top note); a trigger key outside the scale passes through untouched.
 //
 // Written against the plain CLAP C API; the AUv2 wrapper turns it into a .component.
 
@@ -72,6 +73,7 @@ enum ParamId : clap_id
   kParamVelTop = 10,
   kParamVelContrary = 11,
   kParamBorrowFourth = 12,
+  kParamInversion = 13,
   kNumParams
 };
 
@@ -109,6 +111,10 @@ const ParamDef kParamDefs[kNumParams] = {
     // Appended at the end (id 12): parameter ids are never inserted or reused.
     {kParamBorrowFourth, "Borrow 4th", 0, static_cast<double>(BorrowDir::Count) - 1, 0,
      true},
+    // Appended at the end (id 13): the inversion of the borrowed chord, applied
+    // after borrowing and before voicing.
+    {kParamInversion, "Inversion", 0, static_cast<double>(InversionType::Count) - 1, 0,
+     true},
 };
 
 static_assert(sizeof(kParamDefs) / sizeof(kParamDefs[0]) == kNumParams,
@@ -116,13 +122,14 @@ static_assert(sizeof(kParamDefs) / sizeof(kParamDefs[0]) == kNumParams,
 
 // Parameter ids are the host's handle on automation: a lane written against an id will
 // be replayed into whatever that id means later. New parameters are appended at the end,
-// never inserted. The old ids (quality, inversion) belonged to the abandoned chord
-// quality feature and are not reused.
+// never inserted. The abandoned chord quality feature never shipped (its tentative
+// quality/inversion ids were never used and are not assigned); the Inversion parameter
+// above is unrelated to it.
 static_assert(kParamVoicing == 0 && kParamControlRoot == 1 && kParamTriggerStart == 2 &&
                   kParamBorrowTop == 3 && kParamBorrowSecond == 4 && kParamBorrowThird == 5 &&
                   kParamContraryMotion == 6 && kParamVelBottom == 7 && kParamVelSecond == 8 &&
                   kParamVelThird == 9 && kParamVelTop == 10 && kParamVelContrary == 11 &&
-                  kParamBorrowFourth == 12,
+                  kParamBorrowFourth == 12 && kParamInversion == 13,
               "ids are frozen");
 
 // The velocity parameter of each generated note of one trigger: the four chord notes
@@ -183,6 +190,9 @@ struct HeldChord
   // The voicing in force when the chord was triggered; re-voicing on an override uses
   // the same one so the chord keeps its shape.
   VoicingType voicing = VoicingType::Close;
+  // The inversion in force when the chord was triggered; the override re-voices with
+  // the same one so the chord keeps its rotation.
+  InversionType inversion = InversionType::Root;
   // True when any borrow switch was enabled at trigger time. While such a chord is
   // held, keys below its top pass through rather than triggering.
   bool borrowActive = false;
@@ -299,6 +309,7 @@ struct Bhl
   void publishToGui()
   {
     gui.voicing.store(paramInt(kParamVoicing), std::memory_order_relaxed);
+    gui.inversion.store(paramInt(kParamInversion), std::memory_order_relaxed);
     gui.controlRoot.store(paramInt(kParamControlRoot), std::memory_order_relaxed);
     gui.triggerStart.store(paramInt(kParamTriggerStart), std::memory_order_relaxed);
     gui.selection.store(selection.load(std::memory_order_relaxed), std::memory_order_relaxed);
@@ -320,6 +331,11 @@ struct Bhl
             static_cast<BorrowDir>(paramInt(kParamBorrowSecond)),
             static_cast<BorrowDir>(paramInt(kParamBorrowTop)),
             static_cast<BorrowDir>(paramInt(kParamBorrowFourth))};
+  }
+
+  InversionType inversion() const
+  {
+    return static_cast<InversionType>(paramInt(kParamInversion));
   }
 
   bool contraryMotionEnabled() const
@@ -490,6 +506,9 @@ void drainGuiRequests(Bhl *rc, const clap_output_events_t *out, uint32_t time)
     {
       case GuiState::Request::Voicing:
         id = kParamVoicing;
+        break;
+      case GuiState::Request::Inversion:
+        id = kParamInversion;
         break;
       case GuiState::Request::ControlRoot:
         id = kParamControlRoot;
@@ -858,15 +877,16 @@ bool undoBorrow(Bhl *rc, const ScaleSelection &sel, const clap_event_note_t *not
     if (!isCancelledBorrowVoice(sel, h.degree, note->key % 12, borrow)) continue;
 
     // The cancel note sits below the chord's top, except the un-borrowed top when the
-    // top was borrowed from the previous chord, which sits above it.
+    // inverted top was borrowed from the previous chord, which sits above it.
     int classes[kStackedChordNotes];
-    rootPositionChordClasses(sel, h.degree, classes);
+    invertedChordClasses(sel, h.degree, kNoBorrow, h.inversion, classes);
     const bool aboveTop = h.topBorrowPrev &&
                           classes[kStackedChordNotes - 1] % 12 == note->key % 12;
     if (aboveTop ? note->key <= h.key : note->key >= h.key) continue;
 
     // Swap the borrowed voices back in place, with the pressed note sounding.
-    const Chord chord = buildOverrideChord(sel, h.degree, h.key, note->key, h.voicing);
+    const Chord chord = buildOverrideChord(sel, h.degree, h.key, note->key, h.voicing,
+                                           h.inversion);
     revoiceHeldChord(rc, &h, note, out, chord);
     h.overrideKey = note->key;
     h.overrideUsed = true;
@@ -963,6 +983,7 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
 
   const ScaleSelection sel = decodeSelection(rc->selection.load(std::memory_order_relaxed));
   const auto voicing = static_cast<VoicingType>(rc->paramInt(kParamVoicing));
+  const auto inversion = rc->inversion();
   const BorrowSettings borrow = rc->borrowSettings();
 
   // Contrary motion disables the borrow revert, and with it the borrow session that
@@ -1001,7 +1022,7 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
   }
 
   int degree = -1;
-  const Chord chord = buildBorrowedChord(sel, note->key, voicing, borrow, &degree);
+  const Chord chord = buildBorrowedChord(sel, note->key, voicing, inversion, borrow, &degree);
 
   // A note outside the selected scale is passed through untouched.
   if (chord.count == 0)
@@ -1023,9 +1044,17 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
   held->key = note->key;
   held->degree = degree;
   held->voicing = voicing;
+  held->inversion = inversion;
   held->borrowActive = borrow.top != BorrowDir::None || borrow.second != BorrowDir::None ||
                        borrow.third != BorrowDir::None || borrow.fourth != BorrowDir::None;
-  held->topBorrowPrev = borrow.top == BorrowDir::Prev;
+  // The voice that sits on top of the inverted chord (root-position voice index
+  // (inversion + 3) mod 4) is what the session bookkeeping tracks: its borrow switch
+  // decides whether the un-borrowed form sits above the triggered top.
+  const BorrowDir voiceBorrow[kStackedChordNotes] = {borrow.fourth, borrow.third,
+                                                     borrow.second, borrow.top};
+  held->topBorrowPrev =
+      voiceBorrow[(static_cast<int>(inversion) + kStackedChordNotes - 1) %
+                  kStackedChordNotes] == BorrowDir::Prev;
   held->overrideKey = -1;
   held->overrideUsed = false;
   held->count = chord.count;
@@ -1316,6 +1345,9 @@ bool CLAP_ABI paramsValueToText(const clap_plugin_t *, clap_id id, double value,
     case kParamBorrowFourth:
       snprintf(out, cap, "%s", borrowDirName(static_cast<BorrowDir>(v)));
       return true;
+    case kParamInversion:
+      snprintf(out, cap, "%s", inversionTypeName(static_cast<InversionType>(v)));
+      return true;
     case kParamContraryMotion:
       snprintf(out, cap, "%s", v >= 0.5 ? "On" : "Off");
       return true;
@@ -1359,6 +1391,14 @@ bool CLAP_ABI paramsTextToValue(const clap_plugin_t *, clap_id id, const char *t
     case kParamBorrowFourth:
       for (int i = 0; i < static_cast<int>(BorrowDir::Count); ++i)
         if (strcasecmp(text, borrowDirName(static_cast<BorrowDir>(i))) == 0)
+        {
+          *out = i;
+          return true;
+        }
+      break;
+    case kParamInversion:
+      for (int i = 0; i < static_cast<int>(InversionType::Count); ++i)
+        if (strcasecmp(text, inversionTypeName(static_cast<InversionType>(i))) == 0)
         {
           *out = i;
           return true;
@@ -1479,7 +1519,7 @@ const clap_plugin_audio_ports_t kAudioPortsExtension = {audioPortsCount, audioPo
 // clap_plugin_state
 // ---------------------------------------------------------------------------
 
-constexpr uint32_t kStateVersion = 4;
+constexpr uint32_t kStateVersion = 5;
 
 bool CLAP_ABI stateSave(const clap_plugin_t *plugin, const clap_ostream_t *stream)
 {

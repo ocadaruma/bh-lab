@@ -202,7 +202,7 @@ int main()
 
   // --- borrowing ---------------------------------------------------------------
   // B4 on top of C6 with no borrowing is the dim chord, D4 F4 Ab4 B4.
-  expectChord("no borrow: B4 on top of C6", buildBorrowedChord(c6, 71, VoicingType::Close, kNoBorrow),
+  expectChord("no borrow: B4 on top of C6", buildBorrowedChord(c6, 71, VoicingType::Close, InversionType::Root, kNoBorrow),
               (const int[]){62, 65, 68, 71}, 4);
 
   // Borrow the top note from the next chord: the C E G A stack becomes C E G B, so B4
@@ -211,18 +211,18 @@ int main()
     const BorrowSettings topNext = {BorrowDir::None, BorrowDir::None, BorrowDir::Next};
     int degree = -1;
     expectChord("top borrowed next: B4 on top of C6",
-                buildBorrowedChord(c6, 71, VoicingType::Close, topNext, &degree),
+                buildBorrowedChord(c6, 71, VoicingType::Close, InversionType::Root, topNext, &degree),
                 (const int[]){60, 64, 67, 71}, 4);
     expectTrue("top borrowed next: named degree wins", degree == 0);
 
     // The same stack with drop2: B4 G4 E4 C4 -> B4 G3 E4 C4.
     expectChord("top borrowed next + drop2: B4 on top of C6",
-                buildBorrowedChord(c6, 71, VoicingType::Drop2, topNext),
+                buildBorrowedChord(c6, 71, VoicingType::Drop2, InversionType::Root, topNext),
                 (const int[]){55, 60, 64, 71}, 4);
 
     // C# is not a borrowed top of any stack and passes through.
     expectTrue("top borrowed next: C#4 is outside",
-               buildBorrowedChord(c6, 61, VoicingType::Close, topNext).count == 0);
+               buildBorrowedChord(c6, 61, VoicingType::Close, InversionType::Root, topNext).count == 0);
   }
 
   // Borrow the top and the second note from the next: C E G A becomes C E Ab B, and the
@@ -230,11 +230,11 @@ int main()
   {
     const BorrowSettings topSecondNext = {BorrowDir::None, BorrowDir::Next, BorrowDir::Next};
     expectChord("top and 2nd borrowed next: B4 on top of C6",
-                buildBorrowedChord(c6, 71, VoicingType::Close, topSecondNext),
+                buildBorrowedChord(c6, 71, VoicingType::Close, InversionType::Root, topSecondNext),
                 (const int[]){60, 64, 68, 71}, 4);
     // A4 now triggers the borrowed B D F Ab stack, B3 D4 G4 A4.
     expectChord("top and 2nd borrowed next: A4 on top of C6",
-                buildBorrowedChord(c6, 69, VoicingType::Close, topSecondNext),
+                buildBorrowedChord(c6, 69, VoicingType::Close, InversionType::Root, topSecondNext),
                 (const int[]){59, 62, 67, 69}, 4);
 
     // The cancel rule: pressing one of the degree's own un-borrowed top notes (A or G,
@@ -250,7 +250,7 @@ int main()
   {
     const BorrowSettings topPrev = {BorrowDir::None, BorrowDir::None, BorrowDir::Prev};
     expectChord("top borrowed prev: A4 on top of C6",
-                buildBorrowedChord(c6, 69, VoicingType::Close, topPrev),
+                buildBorrowedChord(c6, 69, VoicingType::Close, InversionType::Root, topPrev),
                 (const int[]){62, 65, 68, 69}, 4);
   }
 
@@ -263,11 +263,11 @@ int main()
                                        BorrowDir::Next};
     int degree = -1;
     expectChord("4th borrowed next: A4 on top of C6",
-                buildBorrowedChord(c6, 69, VoicingType::Close, fourthNext, &degree),
+                buildBorrowedChord(c6, 69, VoicingType::Close, InversionType::Root, fourthNext, &degree),
                 (const int[]){62, 64, 67, 69}, 4);
     expectTrue("4th borrowed next: A still triggers degree 0", degree == 0);
     expectChord("4th borrowed next: B4 on top of C6",
-                buildBorrowedChord(c6, 71, VoicingType::Close, fourthNext),
+                buildBorrowedChord(c6, 71, VoicingType::Close, InversionType::Root, fourthNext),
                 (const int[]){64, 65, 68, 71}, 4);
     // The cancel rule: pressing the un-borrowed 4th (C) cancels the borrowing; the
     // borrowed 4th (D) does not, nor do the other voices whose switches are off.
@@ -282,7 +282,7 @@ int main()
     const BorrowSettings fourthPrev = {BorrowDir::None, BorrowDir::None, BorrowDir::None,
                                        BorrowDir::Prev};
     expectChord("4th borrowed prev: A4 on top of C6",
-                buildBorrowedChord(c6, 69, VoicingType::Close, fourthPrev),
+                buildBorrowedChord(c6, 69, VoicingType::Close, InversionType::Root, fourthPrev),
                 (const int[]){59, 64, 67, 69}, 4);
   }
 
@@ -294,13 +294,13 @@ int main()
     const BorrowSettings coincide = {BorrowDir::Prev, BorrowDir::Next, BorrowDir::Prev,
                                      BorrowDir::None};
     expectChord("coincident 2nd stays on top: close",
-                buildBorrowedChord(c6, 72, VoicingType::Close, coincide),
+                buildBorrowedChord(c6, 72, VoicingType::Close, InversionType::Root, coincide),
                 (const int[]){65, 67, 72, 72}, 4);
     expectChord("coincident 2nd stays on top: drop2",
-                buildBorrowedChord(c6, 72, VoicingType::Drop2, coincide),
+                buildBorrowedChord(c6, 72, VoicingType::Drop2, InversionType::Root, coincide),
                 (const int[]){60, 65, 67, 72}, 4);
     expectChord("coincident 2nd stays on top: drop2&4",
-                buildBorrowedChord(c6, 72, VoicingType::Drop2_4, coincide),
+                buildBorrowedChord(c6, 72, VoicingType::Drop2_4, InversionType::Root, coincide),
                 (const int[]){53, 60, 67, 72}, 4);
   }
 
@@ -321,65 +321,132 @@ int main()
   {
     const BorrowSettings thirdPrev = {BorrowDir::Prev, BorrowDir::None, BorrowDir::None};
     expectChord("3rd borrowed prev: A4 on top of C6",
-                buildBorrowedChord(c6, 69, VoicingType::Close, thirdPrev),
+                buildBorrowedChord(c6, 69, VoicingType::Close, InversionType::Root, thirdPrev),
                 (const int[]){60, 62, 67, 69}, 4);
   }
 
   // buildOverrideChord swaps the borrowed voices back in place: pressing E4 (the
   // un-borrowed 3rd-top note) while A4 is the top gives C4 E4 G4 A4 -- only D4 moves.
   expectChord("override: E4 under A4 on degree 0",
-              buildOverrideChord(c6, 0, 69, 64, VoicingType::Close),
+              buildOverrideChord(c6, 0, 69, 64, VoicingType::Close, InversionType::Root),
               (const int[]){60, 64, 67, 69}, 4);
   // The 4th voice reverts in place too: pressing C4 (the un-borrowed 4th) under A4
   // with the 4th borrowed next swaps the borrowed D4 back to C4.
   expectChord("override: C4 under A4 on degree 0 (4th borrowed next)",
-              buildOverrideChord(c6, 0, 69, 60, VoicingType::Close),
+              buildOverrideChord(c6, 0, 69, 60, VoicingType::Close, InversionType::Root),
               (const int[]){60, 64, 67, 69}, 4);
   // Pressing the un-borrowed top (A4 under the borrowed top B4) takes the top itself.
   expectChord("override: A4 under B4 on degree 0",
-              buildOverrideChord(c6, 0, 71, 69, VoicingType::Close),
+              buildOverrideChord(c6, 0, 71, 69, VoicingType::Close, InversionType::Root),
               (const int[]){60, 64, 67, 69}, 4);
   // The override is in place: a cancel note struck an octave away reverts the chord
   // where it was triggered, not where the note was struck.
   expectChord("override: A3 under B4 reverts in place",
-              buildOverrideChord(c6, 0, 71, 57, VoicingType::Close),
+              buildOverrideChord(c6, 0, 71, 57, VoicingType::Close, InversionType::Root),
               (const int[]){60, 64, 67, 69}, 4);
   // Same for a prev-borrowed top: the un-borrowed top lands above the borrowed one,
   // wherever the cancel note was struck.
   expectChord("override: C4 over B4 on degree 2 reverts in place",
-              buildOverrideChord(c6, 2, 71, 60, VoicingType::Close),
+              buildOverrideChord(c6, 2, 71, 60, VoicingType::Close, InversionType::Root),
               (const int[]){64, 67, 69, 72}, 4);
   // Pressing the un-borrowed 2nd-top note (G4) under the borrowed top: G4 stays put, the
   // borrowed top B4 lands on A4.
   expectChord("override: G4 under B4 on degree 0",
-              buildOverrideChord(c6, 0, 71, 67, VoicingType::Close),
+              buildOverrideChord(c6, 0, 71, 67, VoicingType::Close, InversionType::Root),
               (const int[]){60, 64, 67, 69}, 4);
   // The voicing in force at trigger time applies to the override too.
   expectChord("override with drop2",
-              buildOverrideChord(c6, 0, 69, 64, VoicingType::Drop2),
+              buildOverrideChord(c6, 0, 69, 64, VoicingType::Drop2, InversionType::Root),
               (const int[]){55, 60, 64, 69}, 4);
   // A press that is not an un-borrowed voice of the degree, or not below the top, reverts
   // nothing.
   expectTrue("override: F# is not an un-borrowed voice",
-             buildOverrideChord(c6, 0, 69, 65, VoicingType::Close).count == 0);
+             buildOverrideChord(c6, 0, 69, 65, VoicingType::Close, InversionType::Root).count == 0);
   expectTrue("override: press not below the top",
-             buildOverrideChord(c6, 0, 69, 71, VoicingType::Close).count == 0);
+             buildOverrideChord(c6, 0, 69, 71, VoicingType::Close, InversionType::Root).count == 0);
 
   // When the top is borrowed from the previous chord, the un-borrowed top sits ABOVE
   // the borrowed one: pressing it over the trigger key reverts the borrow too.
   // Degree 2 of C6 is E G A C; with the top borrowed prev its top is B, so B4
   // triggers E4 G4 A4 B4 and pressing C5 over it reverts to E4 G4 A4 C5.
   expectChord("override above the top: C5 over B4 on degree 2",
-              buildOverrideChord(c6, 2, 71, 72, VoicingType::Close),
+              buildOverrideChord(c6, 2, 71, 72, VoicingType::Close, InversionType::Root),
               (const int[]){64, 67, 69, 72}, 4);
   expectTrue("override: press at the trigger key reverts nothing",
-             buildOverrideChord(c6, 2, 71, 71, VoicingType::Close).count == 0);
+             buildOverrideChord(c6, 2, 71, 71, VoicingType::Close, InversionType::Root).count == 0);
   // A middle un-borrowed voice above the trigger key is not a cancel note.
   // The engine does not judge the pressed note's position relative to the chord's top
   // (the plugin does): it still reverts in place.
   expectChord("override: in place even when the press is above the top",
-              buildOverrideChord(c6, 2, 71, 79, VoicingType::Close),
+              buildOverrideChord(c6, 2, 71, 79, VoicingType::Close, InversionType::Root),
               (const int[]){64, 67, 69, 72}, 4);
+
+  // --- inversion ---------------------------------------------------------------
+  // Inversion re-rotates the borrowed chord within its octave (root position is
+  // 1 2 3 4, 1st is 2 3 4 1, ...), and the trigger key then matches the inverted
+  // chord's top note. C major 6th, no borrow: degree 0 is C E G A.
+  expectChord("inversion root: A4 on top of degree 0",
+              buildBorrowedChord(c6, 69, VoicingType::Close, InversionType::Root, kNoBorrow),
+              (const int[]){60, 64, 67, 69}, 4);
+  // 1st inversion: the root (C) is the new top, so C4 now triggers the degree: E3 G3 A3 C4.
+  {
+    int degree = -1;
+    expectChord("inversion 1st: C4 on top of degree 0",
+                buildBorrowedChord(c6, 60, VoicingType::Close, InversionType::First, kNoBorrow,
+                                   &degree),
+                (const int[]){52, 55, 57, 60}, 4);
+    expectTrue("inversion 1st: degree 0 from its own root", degree == 0);
+  }
+  // 2nd inversion: the 2nd (E) is the new top: G3 A3 C4 E4.
+  expectChord("inversion 2nd: E4 on top of degree 0",
+              buildBorrowedChord(c6, 64, VoicingType::Close, InversionType::Second, kNoBorrow),
+              (const int[]){55, 57, 60, 64}, 4);
+  // 3rd inversion: the 3rd (G) is the new top: A3 C4 E4 G4.
+  expectChord("inversion 3rd: G4 on top of degree 0",
+              buildBorrowedChord(c6, 67, VoicingType::Close, InversionType::Third, kNoBorrow),
+              (const int[]){57, 60, 64, 67}, 4);
+  // The old trigger keys hit other degrees: root position, A4 triggered degree 0;
+  // in 1st inversion A4 triggers degree 6, whose root-position stack is A C E G:
+  // C4 E4 G4 A4.
+  {
+    int degree = -1;
+    expectChord("inversion 1st: A4 now triggers degree 6",
+                buildBorrowedChord(c6, 69, VoicingType::Close, InversionType::First, kNoBorrow,
+                                   &degree),
+                (const int[]){60, 64, 67, 69}, 4);
+    expectTrue("inversion 1st: A4 is degree 6", degree == 6);
+  }
+
+  // The design.md example: C major 6th, top borrowed from the next, drop2, 2nd
+  // inversion. Degree 0 borrowed is C E G B; inverted it is G B C E, so E5
+  // triggers it -- G3 B4 C5 E5, and drop2 moves the C5 down: C4 G4 B4 E5.
+  {
+    const BorrowSettings topNext = {BorrowDir::None, BorrowDir::None, BorrowDir::Next};
+    expectChord("2nd inversion + top borrowed next + drop2: E5",
+                buildBorrowedChord(c6, 76, VoicingType::Drop2, InversionType::Second, topNext),
+                (const int[]){60, 67, 71, 76}, 4);
+    // The same press in root position triggers degree 3's borrowed stack
+    // (F Ab B E, the top borrowed from degree 4): F4 Ab4 B4 E5.
+    expectChord("root position + top borrowed next: E5 triggers degree 3",
+                buildBorrowedChord(c6, 76, VoicingType::Close, InversionType::Root, topNext),
+                (const int[]){65, 68, 71, 76}, 4);
+  }
+
+  // The override follows the inversion in force: borrow the top from the next
+  // (C E G B), 2nd inversion, triggered on E5 (G4 B4 C5 E5). Pressing A4 (the
+  // un-borrowed top) reverts to the un-borrowed stack inverted the same way, at the
+  // trigger key's octave: G4 A4 C5 E5.
+  {
+    expectChord("override 2nd inversion: A4 under E5 on degree 0",
+                buildOverrideChord(c6, 0, 76, 69, VoicingType::Close, InversionType::Second),
+                (const int[]){67, 69, 72, 76}, 4);
+    // Root inversion triggers the degree from its borrowed top (B4); the same cancel
+    // press reverts in the root position, the un-borrowed top A landing on top: the
+    // classic in-place revert C4 E4 G4 A4.
+    expectChord("override root inversion: A4 under B4 on degree 0",
+                buildOverrideChord(c6, 0, 71, 69, VoicingType::Close, InversionType::Root),
+                (const int[]){60, 64, 67, 69}, 4);
+  }
 
   // --- contrary motion ---------------------------------------------------------
   // The contrary note walks down the scale by the number of scale steps between the

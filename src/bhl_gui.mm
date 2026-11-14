@@ -1,9 +1,10 @@
 // Cocoa view for bh-lab.
 //
 // Layout, per the mockup (mockup/ui-mockup.html): a header with the scale in force
-// and the playing state; three side-by-side panels -- Voicing (2x2 buttons plus the
-// contrary-motion toggle), Borrowing (a 4x3 matrix), Note Velocity (five faders); a row
-// of control/trigger zone steppers; and the 88-key board with the zones drawn by color.
+// and the playing state; three side-by-side panels -- Borrowing (a 4x3 matrix),
+// Voicing (the inversion switch above the voicing switch, single rows, plus the
+// contrary-motion toggle), Note Velocity (five faders); a row of control/trigger zone
+// steppers; and the 88-key board with the zones drawn by color.
 //
 // Compiled without ARC (the CMake default for .mm), so the view is retained and released
 // manually by guiCreate/guiDestroy.
@@ -162,21 +163,39 @@ CGFloat panelX(int i)
   return kPad + i * (kPanelW + kPanelGap);
 }
 
-// ---- Voicing panel: a 2x2 grid of buttons (Close | Drop 2 / Drop 3 | Drop 2&4) and,
-// below a divider, the contrary-motion toggle. ----
+// ---- Voicing panel: the inversion switch (Root | 1st | 2nd | 3rd) above the
+// voicing switch (Close | Drop 2 | Drop 3 | Drop 2&4), each a single row of four
+// buttons, and below a divider the contrary-motion toggle. ----
 
-constexpr CGFloat kBtnH = 40;
 constexpr CGFloat kBtnGap = 8;
-constexpr CGFloat kVoicingGridY = kPanelY + 34;
+constexpr CGFloat kSwitchBtnH = 28;
+// The switch rows use a tighter gap than the borrow matrix, so the widest label
+// (Drop 2&4) has room to breathe.
+constexpr CGFloat kSwitchGap = 4;
+// Each switch sits under its own small-caps section label, so the inversion reads
+// as its own control rather than part of the voicing group.
+constexpr CGFloat kInversionLabelY = kPanelY + 32;
+constexpr CGFloat kInversionRowY = kPanelY + 48;
+constexpr CGFloat kVoicingLabelY = kInversionRowY + kSwitchBtnH + 8;
+constexpr CGFloat kVoicingRowY = kVoicingLabelY + 14;
+
+CGFloat switchButtonWidth()
+{
+  return (kInnerW - 3 * kSwitchGap) / 4;
+}
 
 NSRect voicingButtonRect(int index, CGFloat viewWidth)
 {
   (void)viewWidth;
-  const CGFloat w = (kInnerW - kBtnGap) / 2;
-  const int col = index % 2;
-  const int row = index / 2;
-  return NSMakeRect(panelX(0) + kPanelPad + col * (w + kBtnGap),
-                    kVoicingGridY + row * (kBtnH + kBtnGap), w, kBtnH);
+  return NSMakeRect(panelX(1) + kPanelPad + index * (switchButtonWidth() + kSwitchGap),
+                    kVoicingRowY, switchButtonWidth(), kSwitchBtnH);
+}
+
+NSRect inversionButtonRect(int index, CGFloat viewWidth)
+{
+  (void)viewWidth;
+  return NSMakeRect(panelX(1) + kPanelPad + index * (switchButtonWidth() + kSwitchGap),
+                    kInversionRowY, switchButtonWidth(), kSwitchBtnH);
 }
 
 // The contrary motion switch (its label sits to the right; only the switch is
@@ -187,7 +206,7 @@ constexpr CGFloat kToggleHeight = 22;
 NSRect contraryToggleRect(CGFloat viewWidth)
 {
   (void)viewWidth;
-  return NSMakeRect(panelX(0) + kPanelPad, kPanelY + 144, kToggleWidth, kToggleHeight);
+  return NSMakeRect(panelX(1) + kPanelPad, kPanelY + 144, kToggleWidth, kToggleHeight);
 }
 
 // ---- Borrowing panel: a 4x3 matrix. The row labels read Top / 2nd / 3rd / 4th; the
@@ -207,7 +226,7 @@ CGFloat borrowColWidth()
 
 CGFloat borrowColX(int slot)
 {
-  return panelX(1) + kPanelPad + kBorrowLabelW + slot * (borrowColWidth() + kBtnGap);
+  return panelX(0) + kPanelPad + kBorrowLabelW + slot * (borrowColWidth() + kBtnGap);
 }
 
 NSRect borrowButtonRect(int row, int slot, CGFloat viewWidth)
@@ -379,6 +398,7 @@ struct Snapshot
   int selection = -1;
   uint64_t heldControl[2] = {};
   int voicing = -1;
+  int inversion = -1;
   int borrowTop = -1;
   int borrowSecond = -1;
   int borrowThird = -1;
@@ -394,7 +414,8 @@ struct Snapshot
            chord[0] == o.chord[0] && chord[1] == o.chord[1] &&
            rootKey == o.rootKey && selection == o.selection &&
            heldControl[0] == o.heldControl[0] && heldControl[1] == o.heldControl[1] &&
-           voicing == o.voicing && borrowTop == o.borrowTop &&
+           voicing == o.voicing && inversion == o.inversion &&
+           borrowTop == o.borrowTop &&
            borrowSecond == o.borrowSecond && borrowThird == o.borrowThird &&
            borrowFourth == o.borrowFourth &&
            contraryMotion == o.contraryMotion &&
@@ -417,6 +438,7 @@ Snapshot takeSnapshot(GuiState *state)
   s.heldControl[0] = state->heldControl[0].load(std::memory_order_relaxed);
   s.heldControl[1] = state->heldControl[1].load(std::memory_order_relaxed);
   s.voicing = state->voicing.load(std::memory_order_relaxed);
+  s.inversion = state->inversion.load(std::memory_order_relaxed);
   s.borrowTop = state->borrowTop.load(std::memory_order_relaxed);
   s.borrowSecond = state->borrowSecond.load(std::memory_order_relaxed);
   s.borrowThird = state->borrowThird.load(std::memory_order_relaxed);
@@ -451,6 +473,8 @@ Snapshot takeSnapshot(GuiState *state)
 - (void)drawPanel:(NSRect)r title:(NSString *)title;
 - (void)drawSegButton:(NSRect)r title:(NSString *)title selected:(BOOL)selected
                green:(BOOL)green;
+- (void)drawSegButton:(NSRect)r title:(NSString *)title selected:(BOOL)selected
+               green:(BOOL)green font:(CGFloat)size;
 - (void)drawFaderRow:(int)slot value:(double)v;
 - (void)drawZoneStepper:(NSRect)r label:(NSString *)label labelColor:(NSColor *)color
                   value:(NSString *)value;
@@ -528,10 +552,16 @@ Snapshot takeSnapshot(GuiState *state)
            NSTextAlignmentLeft, NSFontWeightSemibold);
 }
 
-// A button in the voicing grid or the borrow matrix: dark when idle, warm orange when
-// selected (green for an active Prev/Next, which moves a voice sideways).
+// A button in the voicing panel or the borrow matrix: dark when idle, warm orange
+// when selected (green for an active Prev/Next, which moves a voice sideways).
 - (void)drawSegButton:(NSRect)r title:(NSString *)title selected:(BOOL)selected
                green:(BOOL)green
+{
+  [self drawSegButton:r title:title selected:selected green:green font:12];
+}
+
+- (void)drawSegButton:(NSRect)r title:(NSString *)title selected:(BOOL)selected
+               green:(BOOL)green font:(CGFloat)size
 {
   NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:r xRadius:7 yRadius:7];
   if (selected)
@@ -550,7 +580,16 @@ Snapshot takeSnapshot(GuiState *state)
   }
   [path setLineWidth:1];
   [path stroke];
-  drawText(title, NSMakeRect(r.origin.x, NSMidY(r) - 8, r.size.width, 16), 12,
+  // A box exactly as tall as the font's line height, centered: drawInRect puts the
+  // baseline at the box's top plus the ascender, so this centers the glyphs --
+  // a fixed-height box would leave stray space below smaller fonts. NB: the
+  // factory returns an autoreleased object, so it is not released (unlike the
+  // [NSFont fontWithName:size:] style constructors).
+  NSFont *font = [NSFont monospacedSystemFontOfSize:size
+                                             weight:selected ? NSFontWeightSemibold
+                                                            : NSFontWeightRegular];
+  const CGFloat lineH = font.ascender - font.descender;
+  drawText(title, NSMakeRect(r.origin.x, NSMidY(r) - lineH / 2, r.size.width, lineH), size,
            selected ? rgb(0.10, 0.07, 0.03) : textDim(), NSTextAlignmentCenter,
            selected ? NSFontWeightSemibold : NSFontWeightRegular);
 }
@@ -781,17 +820,31 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
 
   // ---- The three panels. ----
 
-  [self drawPanel:NSMakeRect(panelX(0), kPanelY, kPanelW, kPanelH) title:@"VOICING"];
-  [self drawPanel:NSMakeRect(panelX(1), kPanelY, kPanelW, kPanelH) title:@"BORROWING"];
+  [self drawPanel:NSMakeRect(panelX(0), kPanelY, kPanelW, kPanelH) title:@"BORROWING"];
+  // No panel title here: the INVERSION / VOICING section labels name the contents.
+  [self drawPanel:NSMakeRect(panelX(1), kPanelY, kPanelW, kPanelH) title:@""];
   [self drawPanel:NSMakeRect(panelX(2), kPanelY, kPanelW, kPanelH) title:@"NOTE VELOCITY"];
 
-  // Voicing: the 2x2 grid.
+  // Voicing: the inversion switch under its own label, then the voicing switch
+  // under its own (single rows of four buttons each, so a smaller font than the
+  // borrow matrix). The labels match the panel titles' size.
+  drawText(@"INVERSION", NSMakeRect(panelX(1) + kPanelPad, kInversionLabelY, kInnerW, 14),
+           9.5, textFaint(), NSTextAlignmentLeft, NSFontWeightSemibold);
+  static const char *kInversionLabels[4] = {"Root", "1st", "2nd", "3rd"};
+  for (int i = 0; i < static_cast<int>(InversionType::Count); ++i)
+    [self drawSegButton:inversionButtonRect(i, [self bounds].size.width)
+                  title:[NSString stringWithUTF8String:kInversionLabels[i]]
+               selected:i == _lastDrawn.inversion
+                  green:NO font:12];
+
+  drawText(@"VOICING", NSMakeRect(panelX(1) + kPanelPad, kVoicingLabelY, kInnerW, 14),
+           9.5, textFaint(), NSTextAlignmentLeft, NSFontWeightSemibold);
   static const char *kVoicingLabels[4] = {"Close", "Drop 2", "Drop 3", "Drop 2&4"};
   for (int i = 0; i < static_cast<int>(VoicingType::Count); ++i)
     [self drawSegButton:voicingButtonRect(i, [self bounds].size.width)
                   title:[NSString stringWithUTF8String:kVoicingLabels[i]]
                selected:i == _lastDrawn.voicing
-                  green:NO];
+                  green:NO font:10.5];
 
   // The divider, then the contrary-motion toggle with its label to the right.
   [lineSoft() setFill];
@@ -836,7 +889,7 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
     {
       const int value = kBorrowRowValues[row];
       drawText([NSString stringWithUTF8String:kBorrowRowLabels[row]],
-               NSMakeRect(panelX(1) + kPanelPad, kBorrowRow0Y + row * kBorrowRowStep +
+               NSMakeRect(panelX(0) + kPanelPad, kBorrowRow0Y + row * kBorrowRowStep +
                                           (kBorrowBtnH - 14) / 2,
                           kBorrowLabelW - 4, 14), 11, textDim(), NSTextAlignmentRight);
       for (int slot = 0; slot < 3; ++slot)
@@ -903,7 +956,21 @@ NSRect zoneSpan(NSRect area, int low, int high, int lo, int hi)
   const NSPoint p = [self convertPoint:[event locationInWindow] fromView:nil];
   const CGFloat viewWidth = [self bounds].size.width;
 
-  // The voicing grid.
+  // The inversion row.
+  {
+    const int count = static_cast<int>(InversionType::Count);
+    for (int i = 0; i < count; ++i)
+    {
+      if (NSPointInRect(p, inversionButtonRect(i, viewWidth)))
+      {
+        _state->request(GuiState::Request::Inversion, i);
+        [self setNeedsDisplay:YES];
+        return;
+      }
+    }
+  }
+
+  // The voicing row.
   {
     const int count = static_cast<int>(VoicingType::Count);
     for (int i = 0; i < count; ++i)
@@ -1122,6 +1189,12 @@ ViewRect guiStepperRect(StepperId stepper, double viewWidth)
 ViewRect guiVoicingButtonRect(int index, double viewWidth)
 {
   const NSRect r = voicingButtonRect(index, viewWidth);
+  return {r.origin.x, r.origin.y, r.size.width, r.size.height};
+}
+
+ViewRect guiInversionButtonRect(int index, double viewWidth)
+{
+  const NSRect r = inversionButtonRect(index, viewWidth);
   return {r.origin.x, r.origin.y, r.size.width, r.size.height};
 }
 

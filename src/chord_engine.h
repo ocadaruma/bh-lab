@@ -34,6 +34,20 @@ enum class VoicingType : int
   Count
 };
 
+// How a stacked chord is rotated within its octave, by which of its four voices, the
+// order of the voices counting from the root (NOT a scale degree), becomes the new
+// root: Root is root position (1 2 3 4), First makes the 2nd voice the new root
+// (2 3 4 1, the 1st an octave up), and so on. Inversion is applied to the borrowed
+// chord, before voicing: the trigger key then matches the inverted chord's top note.
+enum class InversionType : int
+{
+  Root = 0,
+  First = 1,
+  Second = 2,
+  Third = 3,
+  Count
+};
+
 static constexpr int kScaleNoteCount = 8;
 static constexpr int kStackedChordNotes = 4;
 
@@ -74,9 +88,10 @@ struct ScaleSelection
 bool selectScale(uint16_t pitchClassMask, ScaleSelection *out);
 
 // The stacked chord of the selected scale in the requested voicing, with `topKey`
-// as its top note and no borrowing: the equivalent of buildBorrowedChord with
-// kNoBorrow. Returns a chord of count 0 if the note is not in the scale; voices
-// that fall outside 0..127 are dropped rather than wrapped.
+// as its top note and no borrowing or inversion: the equivalent of
+// buildBorrowedChord with kNoBorrow and InversionType::Root. Returns a chord of
+// count 0 if the note is not in the scale; voices that fall outside 0..127 are
+// dropped rather than wrapped.
 Chord buildStackedChord(const ScaleSelection &sel, int topKey, VoicingType voicing);
 
 // "major 6th dim", for the interface.
@@ -121,12 +136,20 @@ void rootPositionChordClasses(const ScaleSelection &sel, int degree, int classes
 void borrowedChordClasses(const ScaleSelection &sel, int degree, const BorrowSettings &borrow,
                           int classes[4]);
 
-// The chord the trigger key `topKey` sounds: the degree whose borrowed top note has
+// The borrowed stack of degree `degree` after the inversion is applied: the voices
+// are rotated within the octave so that voice `inversion` (0 = root) becomes the new
+// root. The last class is the inverted chord's top note, what the trigger key
+// matches.
+void invertedChordClasses(const ScaleSelection &sel, int degree, const BorrowSettings &borrow,
+                          InversionType inversion, int classes[4]);
+
+// The chord the trigger key `topKey` sounds: the degree whose inverted top note has
 // topKey's pitch class (the named chord's degrees are preferred over the diminished
 // chord's), stacked with topKey on top and voiced. *outDegree, when non-null,
 // receives that degree; -1 when nothing matched (chord count 0).
 Chord buildBorrowedChord(const ScaleSelection &sel, int topKey, VoicingType voicing,
-                         const BorrowSettings &borrow, int *outDegree = nullptr);
+                         InversionType inversion, const BorrowSettings &borrow,
+                         int *outDegree = nullptr);
 
 // The chord of a fixed degree with `topKey` as its top note: the degree's root-position
 // stack, borrowed and voiced. The degree's own top class sits on topKey when it equals
@@ -137,16 +160,16 @@ Chord buildDegreeChord(const ScaleSelection &sel, int degree, int topKey, Voicin
                        const BorrowSettings &borrow);
 
 // The un-borrowed form of a held chord, re-voiced in place. `triggerKey` is the chord's
-// top as it was triggered (its pitch class is the borrowed top's) and `pressKey` is an
-// un-borrowed note of the degree that the user pressed. The pressed note
-// only selects the revert: the chord becomes the un-borrowed stack at the trigger
-// key's octave -- every voice where the borrowed form had it, the top on the side the
-// un-borrowed top belongs to -- so the chord keeps the octave it was triggered in.
-// Returns a chord of count 0 when the pressed note is not one of the degree's
-// un-borrowed voices; judging the pressed note's position relative to the chord's top
-// is the caller's job.
+// top as it was triggered (its pitch class is the borrowed, inverted top's) and
+// `pressKey` is an un-borrowed note of the degree that the user pressed. The pressed
+// note only selects the revert: the chord becomes the un-borrowed stack, inverted the
+// same way, at the trigger key's octave -- every voice where the borrowed form had it,
+// the inverted top on the side it belongs to -- so the chord keeps the octave it was
+// triggered in. Returns a chord of count 0 when the pressed note is not one of the
+// degree's un-borrowed voices; judging the pressed note's position relative to the
+// chord's top is the caller's job.
 Chord buildOverrideChord(const ScaleSelection &sel, int degree, int triggerKey, int pressKey,
-                         VoicingType voicing);
+                         VoicingType voicing, InversionType inversion);
 
 // True when pc is one of degree `degree`'s un-borrowed classes, for a voice whose
 // borrow switch is active -- pressing that note cancels the chord's borrowing.
@@ -166,5 +189,7 @@ int contraryNote(const ScaleSelection &sel, int sessionKey, int bottomKey, int p
 
 // "None", "Prev", "Next", for a borrow button.
 const char *borrowDirName(BorrowDir dir);
+// "Root", "1st", "2nd", "3rd", for an inversion button.
+const char *inversionTypeName(InversionType inversion);
 
 }  // namespace bhl

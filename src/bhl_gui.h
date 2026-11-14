@@ -21,6 +21,7 @@ struct GuiState
   std::atomic<int> selection = {0};        // ScaleSelection: family * 12 + key pitch class.
   std::atomic<uint64_t> heldControl[2] = {};  // Control-zone keys currently held.
   std::atomic<int> voicing = {0};
+  std::atomic<int> inversion = {0};
   std::atomic<int> borrowTop = {0};
   std::atomic<int> borrowSecond = {0};
   std::atomic<int> borrowThird = {0};
@@ -43,6 +44,7 @@ struct GuiState
   enum class Request : int
   {
     Voicing,
+    Inversion,
     ControlRoot,
     TriggerStart,
     BorrowTop,
@@ -89,6 +91,9 @@ struct GuiState
     {
       case Request::Voicing:
         voicing.store(static_cast<int>(value), std::memory_order_relaxed);
+        break;
+      case Request::Inversion:
+        inversion.store(static_cast<int>(value), std::memory_order_relaxed);
         break;
       case Request::BorrowTop:
         borrowTop.store(static_cast<int>(value), std::memory_order_relaxed);
@@ -221,9 +226,13 @@ struct ViewRect
 
 ViewRect guiStepperRect(StepperId stepper, double viewWidth);
 
-// Test support: a voicing button of the 2x2 grid, by its index (Close, Drop2, Drop3,
-// Drop2&4).
+// Test support: a voicing button of the single row, by its index (Close, Drop2,
+// Drop3, Drop2&4).
 ViewRect guiVoicingButtonRect(int index, double viewWidth);
+
+// Test support: an inversion button of the single row, by its index (Root, 1st, 2nd,
+// 3rd).
+ViewRect guiInversionButtonRect(int index, double viewWidth);
 
 // Test support: a borrow row button. Row 0 is the top voice, 1 the second, 2 the
 // third, 3 the fourth (the bottom); the index is the borrow direction (None, Prev,

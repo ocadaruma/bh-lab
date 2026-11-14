@@ -38,6 +38,13 @@ static_assert(sizeof(kVoicingNames) / sizeof(kVoicingNames[0]) ==
                   static_cast<size_t>(VoicingType::Count),
               "voicing table out of sync with the enum");
 
+constexpr const char *kInversionNames[static_cast<int>(InversionType::Count)] = {
+    "Root", "1st", "2nd", "3rd"};
+
+static_assert(sizeof(kInversionNames) / sizeof(kInversionNames[0]) ==
+                  static_cast<size_t>(InversionType::Count),
+              "inversion table out of sync with the enum");
+
 bool inRange(int v, int count)
 {
   return v >= 0 && v < count;
@@ -167,7 +174,7 @@ bool selectScale(uint16_t pitchClassMask, ScaleSelection *out)
 
 Chord buildStackedChord(const ScaleSelection &sel, int topKey, VoicingType voicing)
 {
-  return buildBorrowedChord(sel, topKey, voicing, kNoBorrow);
+  return buildBorrowedChord(sel, topKey, voicing, InversionType::Root, kNoBorrow);
 }
 
 // ---------------------------------------------------------------------------
@@ -315,6 +322,22 @@ void borrowedChordClasses(const ScaleSelection &sel, int degree, const BorrowSet
     classes[j] = rootPos[(d + shift[j] + kScaleNoteCount) % kScaleNoteCount][j];
 }
 
+void invertedChordClasses(const ScaleSelection &sel, int degree, const BorrowSettings &borrow,
+                          InversionType inversion, int classes[4])
+{
+  int borrowed[kStackedChordNotes];
+  borrowedChordClasses(sel, degree, borrow, borrowed);
+
+  // Rotate the borrowed stack within its octave: the inverted stack's root is the
+  // borrowed voice `inversion` (0 = root), the later voices wrap up an octave.
+  const int inv =
+      inRange(static_cast<int>(inversion), static_cast<int>(InversionType::Count))
+          ? static_cast<int>(inversion)
+          : 0;
+  for (int j = 0; j < kStackedChordNotes; ++j)
+    classes[j] = borrowed[(inv + j) % kStackedChordNotes];
+}
+
 Chord buildDegreeChord(const ScaleSelection &sel, int degree, int topKey, VoicingType voicing,
                        const BorrowSettings &borrow)
 {
@@ -328,7 +351,7 @@ Chord buildDegreeChord(const ScaleSelection &sel, int degree, int topKey, Voicin
 }
 
 Chord buildBorrowedChord(const ScaleSelection &sel, int topKey, VoicingType voicing,
-                         const BorrowSettings &borrow, int *outDegree)
+                         InversionType inversion, const BorrowSettings &borrow, int *outDegree)
 {
   if (outDegree) *outDegree = -1;
 
@@ -337,14 +360,14 @@ Chord buildBorrowedChord(const ScaleSelection &sel, int topKey, VoicingType voic
   if (topKey < 0 || topKey > 127) return Chord();
   const int pc = topKey % 12;
 
-  // The degree whose borrowed top note is the pressed class. The eight borrowed tops
+  // The degree whose inverted top note is the pressed class. The eight inverted tops
   // are eight distinct pitch classes, so at most one named and one diminished degree
   // can match; the named one wins, mirroring selectScale's named-over-dim tiers.
   for (int parity = 0; parity < 2; ++parity)
     for (int d = parity; d < kScaleNoteCount; d += 2)
     {
       int classes[kStackedChordNotes];
-      borrowedChordClasses(sel, d, borrow, classes);
+      invertedChordClasses(sel, d, borrow, inversion, classes);
       if (classes[kStackedChordNotes - 1] % 12 == pc)
       {
         if (outDegree) *outDegree = d;
@@ -356,7 +379,7 @@ Chord buildBorrowedChord(const ScaleSelection &sel, int topKey, VoicingType voic
 }
 
 Chord buildOverrideChord(const ScaleSelection &sel, int degree, int triggerKey, int pressKey,
-                         VoicingType voicing)
+                         VoicingType voicing, InversionType inversion)
 {
   Chord chord;
 
@@ -372,16 +395,25 @@ Chord buildOverrideChord(const ScaleSelection &sel, int degree, int triggerKey, 
   const int l = pressKey % 12;
 
   // The pressed note selects the revert; it must be one of the degree's un-borrowed
-  // voices. The chord itself is re-voiced in place, as the un-borrowed stack
-  // at the trigger key's octave: each voice sits where the borrowed form had it, and
-  // the top goes to the side of the trigger key the un-borrowed top belongs to (below
-  // for a next borrow, above for a previous one). The pressed key's own octave is not
+  // voices. The chord itself is re-voiced in place, as the un-borrowed stack --
+  // inverted the same way as the borrowed one was -- at the trigger key's octave:
+  // each voice sits where the borrowed form had it, and the inverted top goes to the
+  // side of the trigger key it belongs to (below for a next borrow of the inverted
+  // top, above for a previous one). The pressed key's own octave is not
   // moved to -- the chord keeps the octave it was triggered in. When the press sits in
   // that octave, its note is the chord's own voice.
   int pressedSlot = -1;
   for (int j = 0; j < kStackedChordNotes; ++j)
     if (u[j] % 12 == l) pressedSlot = j;
   if (pressedSlot < 0) return chord;  // Not an un-borrowed voice of this degree.
+
+  // The un-borrowed stack rotated within its octave, voice `inversion` as the new root.
+  const int inv =
+      inRange(static_cast<int>(inversion), static_cast<int>(InversionType::Count))
+          ? static_cast<int>(inversion)
+          : 0;
+  int v[kStackedChordNotes];
+  for (int j = 0; j < kStackedChordNotes; ++j) v[j] = u[(inv + j) % kStackedChordNotes];
 
   int voices[kStackedChordNotes] = {};
   int count = 0;
@@ -390,13 +422,13 @@ Chord buildOverrideChord(const ScaleSelection &sel, int degree, int triggerKey, 
     int key;
     if (j == kStackedChordNotes - 1)
     {
-      const int d = ((u[j] - T) % 12 + 12) % 12;
+      const int d = ((v[j] - T) % 12 + 12) % 12;
       key = triggerKey + (d > 6 ? d - 12 : d);
     }
-    else if (u[j] % 12 == T)
+    else if (v[j] % 12 == T)
       key = triggerKey - 12;
     else
-      key = triggerKey - ((T - u[j] + 12) % 12);
+      key = triggerKey - ((T - v[j] + 12) % 12);
     if (key < 0 || key > 127) continue;
     voices[count++] = key;
   }
@@ -469,6 +501,12 @@ const char *borrowDirName(BorrowDir dir)
   static const char *names[static_cast<int>(BorrowDir::Count)] = {"None", "Prev", "Next"};
   const int d = static_cast<int>(dir);
   return inRange(d, static_cast<int>(BorrowDir::Count)) ? names[d] : "?";
+}
+
+const char *inversionTypeName(InversionType inversion)
+{
+  const int v = static_cast<int>(inversion);
+  return inRange(v, static_cast<int>(InversionType::Count)) ? kInversionNames[v] : "?";
 }
 
 const char *scaleFamilyName(ScaleFamily family)

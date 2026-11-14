@@ -57,6 +57,7 @@ Based on Barry Harris's diminished scale, the plugin triggers a chord
 
 - When a note is pressed in this zone, it will trigger a chord based on the selected scale around the pressed note
   * How chord stacked is based on voicing type, described below
+  * The chord is determined by the pipeline borrowing → inversion → voicing (described below), and the pressed note must match the transformed chord's top note
 - If a note that is not in the scale is pressed, it will be passed through without any change
 
 ## voicing type
@@ -67,6 +68,18 @@ Based on Barry Harris's diminished scale, the plugin triggers a chord
   * drop2: the same stack with the second note from the top moved down an octave (G2 A3 C4 E4)
   * drop3: the third note from the top moved down an octave (G3 A2 C4 E4)
   * drop2&4: the second and fourth notes from the top moved down an octave (G2 C3 A3 E4)
+
+## Inversion
+- Inversion re-rotates the borrowed chord within its octave, by which of its four voices (counted from the root, NOT a scale degree) becomes the new root:
+  * root position: 1 2 3 4
+  * 1st inversion: 2 3 4 1 (1 moves up an octave)
+  * 2nd inversion: 3 4 1 2 (1, 2 move up an octave)
+  * 3rd inversion: 4 1 2 3 (1, 2, 3 move up an octave)
+- It is applied to the borrowed chord (borrowing first, voicing after), so the pipeline that determines the triggered chord is:
+  * borrowing transforms the scale's stacked chords (described below)
+  * inversion rotates each transformed chord within its octave
+  * voicing is applied to the inverted chord
+- The trigger rule is the same, but against the inverted chords: the pressed note must match the inverted chord's top note, which is the voice `(4 - inversion)` from the root of the borrowed chord (e.g. with 2nd inversion, pressing E4 in C major 6th triggers degree 0's C E G A stack -- G3 A3 C4 E4 -- because E is its 2nd voice).
 
 ## Borrowing
 - Borrowing is a concept to substitute a part of the chord with a note from next or previous chord in the scale, to make the chord sound more interesting.

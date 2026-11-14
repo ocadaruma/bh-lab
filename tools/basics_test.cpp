@@ -24,6 +24,7 @@ void reset(const clap_plugin_t *plugin, Timeline *timeline)
   setup.addParam(kBorrowSecond, 0);   // None
   setup.addParam(kBorrowThird, 0);    // None
   setup.addParam(kBorrowFourth, 0);   // None
+  setup.addParam(kInversion, 0);      // Root
   setup.addParam(kContraryMotion, 0); // Off
   setup.addParam(kVelBottom, 1.0);
   setup.addParam(kVelSecond, 1.0);
@@ -221,6 +222,59 @@ int main()
   {
     InputEvents release;
     release.addNote(CLAP_EVENT_NOTE_OFF, 0, 60, 0.0);
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 48, 0.0);
+    timeline.run(&release);
+  }
+
+  // Inversion: the trigger key matches the inverted chord's top note. With the top
+  // borrowed from the next, degree 0 is C E G B: root position, B4 triggers it
+  // (C4 E4 G4 B4). In 2nd inversion the 2nd voice (E) is the top, so E5 triggers
+  // it instead: G4 B4 C5 E5.
+  reset(plugin, &timeline);
+  {
+    InputEvents setup;
+    setup.addParam(kBorrowTop, 2);  // Next
+    timeline.run(&setup);
+  }
+  holdControl(&timeline, {48});
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 71, 0.8);  // B4
+    timeline.run(&press);
+  }
+  {
+    const std::vector<int> keys = onKeys();
+    const bool rootPos = keys.size() == 4 && keys[0] == 60 && keys[1] == 64 && keys[2] == 67 &&
+                         keys[3] == 71;
+    expect("root position: B4 triggers C4 E4 G4 B4", rootPos, describe(g_emitted));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 71, 0.0);
+    timeline.run(&release);
+  }
+  {
+    InputEvents setup;
+    setup.addParam(kInversion, 2);  // 2nd
+    timeline.run(&setup);
+  }
+  g_emitted.clear();
+  {
+    InputEvents press;
+    press.addNote(CLAP_EVENT_NOTE_ON, 0, 76, 0.8);  // E5
+    timeline.run(&press);
+  }
+  {
+    const std::vector<int> keys = onKeys();
+    const bool second = keys.size() == 4 && keys[0] == 67 && keys[1] == 71 && keys[2] == 72 &&
+                        keys[3] == 76;
+    expect("2nd inversion: E5 triggers G4 B4 C5 E5", second, describe(g_emitted));
+  }
+  g_emitted.clear();
+  {
+    InputEvents release;
+    release.addNote(CLAP_EVENT_NOTE_OFF, 0, 76, 0.0);
     release.addNote(CLAP_EVENT_NOTE_OFF, 0, 48, 0.0);
     timeline.run(&release);
   }
