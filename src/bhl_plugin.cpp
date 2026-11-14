@@ -1030,6 +1030,8 @@ void triggerChord(Bhl *rc, const clap_event_note_t *note, const clap_event_heade
   held->overrideUsed = false;
   held->count = chord.count;
 
+  // When two voices share a key (a borrowed note coinciding with the top), the first
+  // claim's velocity wins and the pool ref-counts the single physical note.
   for (int i = 0; i < chord.count; ++i)
   {
     held->voices[i].key = static_cast<int16_t>(chord.notes[i]);

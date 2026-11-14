@@ -77,6 +77,7 @@ Based on Barry Harris's diminished scale, the plugin triggers a chord
 - In this plugin, this is implemented by below:
   * Add 4 "borrow" switches for the four voices (top, 2nd, 3rd, 4th), each switch has 3 states: borrow from previous, no borrowing, borrow from next
     * Borrowing will transform the stacked chords to new chords
+    * If a borrowed note lands on the same pitch as another note (usually the top), it sounds on the same key: the chord holds two logical voices on one note, and a drop voicing can move it down an octave like any other note
   * The trigger rule is same, but it against the new transformed chords. e.g.
     * Assume C major 6th diminished scale, and close voicing
     * Originally, when we press B, it will trigger D F Ab B

@@ -286,6 +286,24 @@ int main()
                 (const int[]){59, 64, 67, 69}, 4);
   }
 
+  // A borrowed voice can coincide with the top: borrowing top prev, 2nd next and 3rd
+  // prev of degree 3 (F G A C) gives F G C C. The coincident 2nd stays on the pressed
+  // key -- two logical voices, one physical note -- and a drop voicing moves one of
+  // them like any other voice.
+  {
+    const BorrowSettings coincide = {BorrowDir::Prev, BorrowDir::Next, BorrowDir::Prev,
+                                     BorrowDir::None};
+    expectChord("coincident 2nd stays on top: close",
+                buildBorrowedChord(c6, 72, VoicingType::Close, coincide),
+                (const int[]){65, 67, 72, 72}, 4);
+    expectChord("coincident 2nd stays on top: drop2",
+                buildBorrowedChord(c6, 72, VoicingType::Drop2, coincide),
+                (const int[]){60, 65, 67, 72}, 4);
+    expectChord("coincident 2nd stays on top: drop2&4",
+                buildBorrowedChord(c6, 72, VoicingType::Drop2_4, coincide),
+                (const int[]){53, 60, 67, 72}, 4);
+  }
+
   // buildDegreeChord re-voices a fixed degree with the pressed note on top: degree 0 of
   // C6 (C E G A) with A4 on top is C4 E4 G4 A4, with no re-derivation of the degree.
   expectChord("degree chord: A4 on degree 0 of C6",

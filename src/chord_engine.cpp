@@ -212,9 +212,10 @@ void rootPositionStack(const FamilyDef &def, int keyPc, int degree, int classes[
 void applyDropVoicing(int voices[], int &count, VoicingType voicing);
 
 // The stack built from four pitch classes with `topKey` on top and the requested
-// voicing applied. The stack's own top class (classes[3]) sits on topKey when it
-// equals topKey's pitch class; any other occurrence of that class sits strictly
-// below, as does every other class.
+// voicing applied. Any voice sharing topKey's pitch class sounds on topKey itself: a
+// borrowed voice may coincide with the top, in which case two voices sit on one key
+// (the plugin's voice pool ref-counts the single physical note) and a drop voicing
+// moves one of them like any other voice.
 Chord stackWithVoicing(const int classes[4], int topKey, VoicingType voicing)
 {
   Chord chord;
@@ -226,10 +227,7 @@ Chord stackWithVoicing(const int classes[4], int topKey, VoicingType voicing)
   for (int j = 0; j < kStackedChordNotes; ++j)
   {
     const int c = classes[j] % 12;
-    const int voice = (j == kStackedChordNotes - 1 && c == pc)    // the stack's top
-                         ? topKey
-                         : (c == pc) ? topKey - 12                 // duplicate class below
-                                     : topKey - ((pc - c + 12) % 12);
+    const int voice = (c == pc) ? topKey : topKey - ((pc - c + 12) % 12);
     if (voice < 0 || voice > 127) continue;
     voices[count++] = voice;
   }
